@@ -749,6 +749,7 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise doctor [--campaign <c>]   (are the host tools there: yt-dlp, gallery-dl, ffmpeg, higgsfield; is the database configured)",
     "  bb brandwise config list [--campaign <c>] | config set <key> <value> [--campaign <c>] | config unset <key> [--campaign <c>]   (provider, account and limits; a campaign overrides its base, which overrides global; no --campaign = global; operator only, agents never change limits or accounts)",
     "  bb brandwise providers status [--campaign <c>]   (is the account of that scope signed in; prints the sign-in command)",
+    "  bb brandwise assets download-videos <instagram profile url> [--campaign <c>] [--limit 5]    (the latest videos and reels of a public profile, max 12, anonymous via Instaloader; a profile that demands a login fails; saved as reference assets, prints local paths, durations and likes)",
     "  bb brandwise assets download-photos <instagram profile or post url> [--campaign <c>] [--limit 12]    (photos, not videos; tries Instaloader anonymously first, and only if Instagram refuses, the session the user connected under Settings > Providers > Downloads; max 40; saved as reference assets, prints local paths)",
     "  bb brandwise assets list [--campaign <c>] | assets url <id> [--seconds 300]",
     "  bb brandwise assets download <url> [--campaign <c>]    (Instagram, TikTok, YouTube; runs on the host outside your sandbox, with the browser session the user picked under Settings > Providers > Downloads, if any; saved as a reference asset, prints its local path)",
@@ -960,6 +961,39 @@ export default async function plugin(bb: BbPluginApi) {
     return { file, info: { uploader: raw.uploader, title: raw.title, description: raw.description, durationSeconds: raw.duration, likes: raw.like_count, url: raw.webpage_url } };
   }
 
+  // The latest videos of a public profile: scans at most 4x the limit of recent posts for videos, so a photo-heavy profile can return fewer.
+  const INSTALOADER_PROFILE_VIDEOS_PY = [
+    "import itertools, json, sys, instaloader",
+    "name, limit, out = sys.argv[1], int(sys.argv[2]), sys.argv[3]",
+    'L = instaloader.Instaloader(dirname_pattern=out, filename_pattern="{shortcode}", download_pictures=False, download_video_thumbnails=False, download_geotags=False,',
+    '                            download_comments=False, save_metadata=False, post_metadata_txt_pattern="", quiet=True)',
+    "n = 0",
+    "for p in itertools.islice(instaloader.Profile.from_username(L.context, name).get_posts(), limit * 4):",
+    "    if not p.is_video: continue",
+    '    L.download_post(p, target="")',
+    '    print(json.dumps({"code": p.shortcode, "uploader": p.owner_username, "description": p.caption, "duration": p.video_duration, "like_count": p.likes}), flush=True)',
+    "    n += 1",
+    "    if n >= limit: break",
+  ].join("\n");
+  async function instaloaderProfileVideos(link: string, limit: number) {
+    const u = new URL(link);
+    const name = u.pathname.replace(/^\/|\/$/g, "");
+    if (u.protocol !== "https:" || !(u.hostname === "instagram.com" || u.hostname.endsWith(".instagram.com")) || !/^[A-Za-z0-9._]{1,30}$/.test(name)) throw new Error("Only https links to an Instagram profile (instagram.com/<user>) are allowed");
+    const dir = px.join(osx.tmpdir(), "bw-downloads", "instagram");
+    fsx.mkdirSync(dir, { recursive: true });
+    const stdout = await new Promise<string>((resolve, reject) =>
+      cp.execFile("sh", ["-c", 'py="$(head -1 "$(command -v instaloader)" | sed "s/^#!//")"; exec "$py" -c "$IL_CODE" "$@"', "sh", name, String(limit), dir],
+        { env: { ...hostEnv(), IL_CODE: INSTALOADER_PROFILE_VIDEOS_PY }, timeout: 600_000, maxBuffer: 1 << 20 },
+        (e, out, stderr) => (e && out.trim() === "" ? reject(new Error(String(stderr || e.message).trim().split("\n").slice(-1)[0])) : resolve(out))),
+    );
+    const videos = stdout.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>).map((raw) => ({
+      file: px.join(dir, `${raw.code}.mp4`),
+      info: { uploader: raw.uploader, title: null, description: raw.description, durationSeconds: raw.duration, likes: raw.like_count, url: `https://www.instagram.com/p/${raw.code}/` },
+    })).filter((v) => fsx.existsSync(v.file));
+    if (videos.length === 0) throw new Error("no videos among the latest posts (or the profile needs a login)");
+    return videos;
+  }
+
   /** Generation parameters from CLI flags. Spawned without a shell, but the lengths and the model name are still bounded. */
   // The provider uploads whatever path it is given, so only media files (or ids of already uploaded ones) are passed on.
   const MEDIA_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm", ".mp3", ".wav", ".m4a"]);
@@ -1000,7 +1034,7 @@ export default async function plugin(bb: BbPluginApi) {
       { name: "email", summary: "E-mail campaign statistics, event replay and e-mail templates", usage: "bb brandwise email stats|ingest|template|brand|component|entry ..." },
       { name: "campaign", summary: "List or add campaigns (an always-on base or a time-bound campaign)", usage: "bb brandwise campaign list|add|channel|assign|unassign ..." },
       { name: "calendar", summary: "List, add, edit, send back, approve, withdraw approval of or cancel calendar entries", usage: "bb brandwise calendar list|add|edit|request-changes|unapprove|approve|cancel|run-due ..." },
-      { name: "assets", summary: "Add, download (Instagram, TikTok, YouTube), list or sign assets stored in S3", usage: "bb brandwise assets add|download|download-photos|list|url ..." },
+      { name: "assets", summary: "Add, download (Instagram, TikTok, YouTube), list or sign assets stored in S3", usage: "bb brandwise assets add|download|download-photos|download-videos|list|url ..." },
       { name: "instagram", summary: "Check that the Instagram connection used for downloads works", usage: "bb brandwise instagram test" },
       { name: "doctor", summary: "Check that the host tools BrandWise needs are installed", usage: "bb brandwise doctor" },
       { name: "config", summary: "Provider, account and limits per scope (global or campaign)", usage: "bb brandwise config list|set|unset ..." },
@@ -1171,6 +1205,22 @@ export default async function plugin(bb: BbPluginApi) {
           bb.realtime.publish(ASSETS_CHANGED, {});
           const caption = String(got.info.description ?? "").replace(/\s+/g, " ").slice(0, 300);
           return reply({ asset: a, path: got.file, info: got.info }, `${a.id}  ${got.file}\n${got.info.uploader ?? "?"}: ${caption}`);
+        }
+        if (area === "assets" && action === "download-videos") {
+          const link = positional(args.slice(2))[0];
+          if (!link) return { exitCode: 1, stderr: usage };
+          const limit = Math.min(Math.max(Math.floor(Number(val(args, "--limit") ?? 5)) || 5, 1), 12);
+          const campaignId = await campaign();
+          const videos = await instaloaderProfileVideos(link, limit);
+          const saved = [];
+          for (const v of videos) {
+            saved.push(await c.assets.save({
+              campaignId, file: v.file, role: "reference", origin: "imported",
+              provenance: { source: v.info.url, tool: "instaloader", ...v.info }, rights: { note: "third-party content, reference only, do not republish" }, createdBy: "cli",
+            }));
+          }
+          bb.realtime.publish(ASSETS_CHANGED, {});
+          return reply({ assets: saved, videos }, `${saved.length} video${saved.length === 1 ? "" : "s"} saved as reference assets:\n${saved.map((a, i) => `${a.id}  ${videos[i].file}  ${videos[i].info.durationSeconds ?? "?"}s  ${videos[i].info.likes ?? "?"} likes`).join("\n")}`);
         }
         if (area === "assets" && action === "download-photos") {
           const link = positional(args.slice(2))[0];
