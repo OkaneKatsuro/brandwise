@@ -749,7 +749,7 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise doctor [--campaign <c>]   (are the host tools there: yt-dlp, gallery-dl, ffmpeg, higgsfield; is the database configured)",
     "  bb brandwise config list [--campaign <c>] | config set <key> <value> [--campaign <c>] | config unset <key> [--campaign <c>]   (provider, account and limits; a campaign overrides its base, which overrides global; no --campaign = global; operator only, agents never change limits or accounts)",
     "  bb brandwise providers status [--campaign <c>]   (is the account of that scope signed in; prints the sign-in command)",
-    "  bb brandwise assets download-photos <instagram profile or post url> [--campaign <c>] [--limit 12]    (photos, not videos; Instagram shows them to signed-in sessions only, so the user must have picked a browser session under Settings > Providers > Downloads; max 40; saved as reference assets, prints local paths)",
+    "  bb brandwise assets download-photos <instagram profile or post url> [--campaign <c>] [--limit 12]    (photos, not videos; tries Instaloader anonymously first, and only if Instagram refuses, the session the user connected under Settings > Providers > Downloads; max 40; saved as reference assets, prints local paths)",
     "  bb brandwise assets list [--campaign <c>] | assets url <id> [--seconds 300]",
     "  bb brandwise assets download <url> [--campaign <c>]    (Instagram, TikTok, YouTube; runs on the host outside your sandbox, with the browser session the user picked under Settings > Providers > Downloads, if any; saved as a reference asset, prints its local path)",
     "  bb brandwise assets rename <id> <name> | assets set <id> --status <draft|linted|approved|archived> | assets delete <id>",
@@ -903,6 +903,33 @@ export default async function plugin(bb: BbPluginApi) {
     const files = out.split("\n").map((l) => l.replace(/^#\s*/, "").trim()).filter((l) => l !== "").map((l) => px.resolve(l)).filter((f) => f.startsWith(dir + px.sep) && fsx.existsSync(f));
     if (files.length === 0) throw new Error("Nothing was downloaded (no photos found, or the profile is private)");
     return { dir, files: [...new Set(files)] };
+  }
+
+  // Instaloader first: it reads public profiles and posts anonymously, so most photo downloads need no Instagram session at all.
+  // Its CLI cannot cap the posts of a profile, so the snippet below uses the library of the same install (found through the shebang of `instaloader`).
+  const INSTALOADER_PY = [
+    "import itertools, sys, instaloader",
+    "kind, name, limit, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]",
+    'L = instaloader.Instaloader(dirname_pattern=out, filename_pattern="{date_utc:%Y%m%d}_{shortcode}", download_videos=False, download_video_thumbnails=False,',
+    '                            download_geotags=False, download_comments=False, save_metadata=False, compress_json=False, post_metadata_txt_pattern="", quiet=True)',
+    'posts = itertools.islice(instaloader.Profile.from_username(L.context, name).get_posts(), limit) if kind == "profile" else [instaloader.Post.from_shortcode(L.context, name)]',
+    'for p in posts: L.download_post(p, target="")',
+  ].join("\n");
+  async function instaloaderPhotos(link: string, limit: number) {
+    const u = new URL(link);
+    const post = /^\/(?:[A-Za-z0-9._]{1,30}\/)?(?:p|reel)\/([\w-]{5,30})/.exec(u.pathname);
+    const name = post ? post[1] : u.pathname.replace(/^\/|\/$/g, "");
+    if (!/^[A-Za-z0-9._-]{1,40}$/.test(name)) throw new Error("not a profile or post link");
+    const dir = px.join(osx.tmpdir(), "bw-downloads", "photos", `il-${slug(u.pathname) || "post"}`);
+    fsx.mkdirSync(dir, { recursive: true });
+    await new Promise<void>((resolve, reject) =>
+      cp.execFile("sh", ["-c", 'py="$(head -1 "$(command -v instaloader)" | sed "s/^#!//")"; exec "$py" -c "$IL_CODE" "$@"', "sh", post ? "post" : "profile", name, String(limit), dir],
+        { env: { ...hostEnv(), IL_CODE: INSTALOADER_PY }, timeout: 180_000, maxBuffer: 1 << 20 },
+        (e, _out, stderr) => (e ? reject(new Error(String(stderr || e.message).trim().split("\n").slice(-1)[0])) : resolve())),
+    );
+    const files = fsx.readdirSync(dir).filter((f) => /\.(jpe?g|png|webp)$/i.test(f)).sort().reverse().slice(0, limit).map((f) => px.join(dir, f));
+    if (files.length === 0) throw new Error("no photos found");
+    return { dir, files, tool: "instaloader" };
   }
 
   /** Generation parameters from CLI flags. Spawned without a shell, but the lengths and the model name are still bounded. */
@@ -1121,12 +1148,15 @@ export default async function plugin(bb: BbPluginApi) {
           const limit = Math.min(Math.max(Math.floor(Number(val(args, "--limit") ?? 12)) || 12, 1), 40);
           if (args.includes("--cookies")) return { exitCode: 1, stderr: `The session is not chosen per call: ${NEEDS_SESSION}` };
           const campaignId = await campaign();
-          const got = await withSession(c, campaignId, (session) => downloadPhotos(link, { session, limit }));
+          // public content needs no session: Instaloader anonymously, and only when it is refused the saved session and gallery-dl
+          const got: { files: string[]; tool: string } = await instaloaderPhotos(link, limit)
+            .catch((first: Error) => withSession(c, campaignId, (session) => downloadPhotos(link, { session, limit })).then((r) => ({ ...r, tool: "gallery-dl" }))
+              .catch((second: Error) => { throw new Error(`Instaloader (anonymous): ${first.message}. Fallback with the connected session: ${second.message}`); }));
           const saved = [];
           for (const file of got.files) {
             saved.push(await c.assets.save({
               campaignId, file, role: "reference", origin: "imported",
-              provenance: { source: link, tool: "gallery-dl" }, rights: { note: "third-party photos, reference only, do not republish; a real person's likeness needs their written consent" }, createdBy: "cli",
+              provenance: { source: link, tool: got.tool }, rights: { note: "third-party photos, reference only, do not republish; a real person's likeness needs their written consent" }, createdBy: "cli",
             }));
           }
           bb.realtime.publish(ASSETS_CHANGED, {});
