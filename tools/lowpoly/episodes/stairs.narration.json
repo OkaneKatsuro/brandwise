@@ -1,0 +1,11 @@
+{
+  "title": "HOW YOU INVENTED\\NSTAIRS",
+  "lines": [
+    { "text": "You want to get onto the roof.", "at": 0.3 },
+    { "text": "So you jump. Except you are not a cat.", "mark": "jump", "offset": 0 },
+    { "text": "So you pile rocks against the wall.", "mark": "pile", "offset": 0 },
+    { "text": "Except rocks roll. Everywhere.", "mark": "roll", "offset": -0.8 },
+    { "text": "So you lay them flat, in steps. Perfect!", "mark": "stairs", "offset": 0 },
+    { "text": "Now you are on the roof. Except you forgot why.", "mark": "roof", "offset": 0 }
+  ]
+}

@@ -31,6 +31,18 @@ mkdir -p downloads/live && ffmpeg -y -i "$url" -vf fps=1/5 -frames:v 4 downloads
 
 Then read the frames (Read tool) and show them with `tools/creative-preview.sh` (paste the printed `::inline-vis{...}` line). Never reference them only by relative path in chat: the sidebar link resolves against the wrong root and shows "File not found". Check first with `yt-dlp --print is_live "<url>"` if unsure. Needs network, so run unsandboxed only if the sandbox blocks it.
 
+## Instagram: use Instaloader first
+
+For Instagram use `tools/ig-dl.sh`, which runs [Instaloader](https://instaloader.github.io) anonymously and needs no browser session:
+
+```bash
+tools/ig-dl.sh post <url|shortcode>...          # one post or reel (media + <name>.json with caption, likes, comments)
+tools/ig-dl.sh profile <username> [--count N]   # latest N posts of a public profile (default 12)
+tools/ig-dl.sh hashtag <tag> [--count N]        # Instagram often demands a login for hashtags
+```
+
+Files land in `downloads/instagram/<target>/`. Keep `--count` small: Instagram blocks by IP and by account. If anonymous access is refused, log in with a throwaway account only (`IG_LOGIN=<username> tools/ig-dl.sh ...`, Instaloader asks for the password once); never use `--cookies chrome` with the user's main account for this. Use `tools/video-dl.sh` (yt-dlp) for Instagram only as a fallback. Instagram access is best effort and will break from time to time; for statistics of the user's own or other business accounts the official Graph API (Business Discovery) is the stable route.
+
 ## When it fails
 
 | Symptom | Fix |

@@ -1,0 +1,58 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 720
+PlayResY: 1280
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Cap,Arial Black,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,7,2,5,40,40,0,1
+Style: Title,Arial Black,64,&H0000E0FF,&H0000E0FF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,6,2,8,40,40,150,1
+
+[Events]
+Format: Layer,Start,End,Style,Name,Effect,Text
+Dialogue: 0,0:00:00.20,0:00:02.40,Title,,,HOW YOU INVENTED\NSTAIRS
+Dialogue: 0,0:00:00.30,0:00:00.53,Cap,,,{\pos(360,1000)}You
+Dialogue: 0,0:00:00.53,0:00:00.82,Cap,,,{\pos(360,1000)}want
+Dialogue: 0,0:00:00.82,0:00:00.99,Cap,,,{\pos(360,1000)}to
+Dialogue: 0,0:00:00.99,0:00:01.22,Cap,,,{\pos(360,1000)}get
+Dialogue: 0,0:00:01.22,0:00:01.51,Cap,,,{\pos(360,1000)}onto
+Dialogue: 0,0:00:01.51,0:00:01.74,Cap,,,{\pos(360,1000)}the
+Dialogue: 0,0:00:01.74,0:00:02.02,Cap,,,{\pos(360,1000)}roof.
+Dialogue: 0,0:00:02.60,0:00:02.87,Cap,,,{\pos(360,1000)}So
+Dialogue: 0,0:00:02.87,0:00:03.23,Cap,,,{\pos(360,1000)}you
+Dialogue: 0,0:00:03.23,0:00:03.68,Cap,,,{\pos(360,1000)}jump.
+Dialogue: 0,0:00:03.68,0:00:04.30,Cap,,,{\pos(360,1000)}Except
+Dialogue: 0,0:00:04.30,0:00:04.66,Cap,,,{\pos(360,1000)}you
+Dialogue: 0,0:00:04.66,0:00:05.02,Cap,,,{\pos(360,1000)}are
+Dialogue: 0,0:00:05.02,0:00:05.38,Cap,,,{\pos(360,1000)}not
+Dialogue: 0,0:00:05.38,0:00:05.56,Cap,,,{\pos(360,1000)}a
+Dialogue: 0,0:00:05.56,0:00:05.92,Cap,,,{\pos(360,1000)}cat.
+Dialogue: 0,0:00:08.40,0:00:08.59,Cap,,,{\pos(360,1000)}So
+Dialogue: 0,0:00:08.59,0:00:08.84,Cap,,,{\pos(360,1000)}you
+Dialogue: 0,0:00:08.84,0:00:09.15,Cap,,,{\pos(360,1000)}pile
+Dialogue: 0,0:00:09.15,0:00:09.53,Cap,,,{\pos(360,1000)}rocks
+Dialogue: 0,0:00:09.53,0:00:10.03,Cap,,,{\pos(360,1000)}against
+Dialogue: 0,0:00:10.03,0:00:10.28,Cap,,,{\pos(360,1000)}the
+Dialogue: 0,0:00:10.28,0:00:10.59,Cap,,,{\pos(360,1000)}wall.
+Dialogue: 0,0:00:18.20,0:00:19.08,Cap,,,{\pos(360,1000)}Except
+Dialogue: 0,0:00:19.08,0:00:19.83,Cap,,,{\pos(360,1000)}rocks
+Dialogue: 0,0:00:19.83,0:00:20.45,Cap,,,{\pos(360,1000)}roll.
+Dialogue: 0,0:00:20.45,0:00:21.83,Cap,,,{\pos(360,1000)}Everywhere.
+Dialogue: 0,0:00:22.10,0:00:22.35,Cap,,,{\pos(360,1000)}So
+Dialogue: 0,0:00:22.35,0:00:22.68,Cap,,,{\pos(360,1000)}you
+Dialogue: 0,0:00:22.68,0:00:23.01,Cap,,,{\pos(360,1000)}lay
+Dialogue: 0,0:00:23.01,0:00:23.43,Cap,,,{\pos(360,1000)}them
+Dialogue: 0,0:00:23.43,0:00:23.85,Cap,,,{\pos(360,1000)}flat,
+Dialogue: 0,0:00:23.85,0:00:24.10,Cap,,,{\pos(360,1000)}in
+Dialogue: 0,0:00:24.10,0:00:24.60,Cap,,,{\pos(360,1000)}steps.
+Dialogue: 0,0:00:24.60,0:00:25.26,Cap,,,{\pos(360,1000)}Perfect!
+Dialogue: 0,0:00:33.40,0:00:33.70,Cap,,,{\pos(360,1000)}Now
+Dialogue: 0,0:00:33.70,0:00:33.99,Cap,,,{\pos(360,1000)}you
+Dialogue: 0,0:00:33.99,0:00:34.29,Cap,,,{\pos(360,1000)}are
+Dialogue: 0,0:00:34.29,0:00:34.51,Cap,,,{\pos(360,1000)}on
+Dialogue: 0,0:00:34.51,0:00:34.80,Cap,,,{\pos(360,1000)}the
+Dialogue: 0,0:00:34.80,0:00:35.17,Cap,,,{\pos(360,1000)}roof.
+Dialogue: 0,0:00:35.17,0:00:35.69,Cap,,,{\pos(360,1000)}Except
+Dialogue: 0,0:00:35.69,0:00:35.98,Cap,,,{\pos(360,1000)}you
+Dialogue: 0,0:00:35.98,0:00:36.50,Cap,,,{\pos(360,1000)}forgot
+Dialogue: 0,0:00:36.50,0:00:36.80,Cap,,,{\pos(360,1000)}why.

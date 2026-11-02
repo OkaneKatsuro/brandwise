@@ -1,0 +1,7 @@
+{
+  "name": "lowpoly",
+  "private": true,
+  "type": "module",
+  "description": "Tiny low-poly 3D film engine: an episode is a function of time, rendered frame by frame in headless Chrome (Three.js), then encoded with ffmpeg.",
+  "dependencies": { "three": "^0.170.0" }
+}

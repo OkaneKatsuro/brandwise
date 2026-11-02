@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+<body style="margin:0;background:#000">
+<script type="module">
+  const ep = new URLSearchParams(location.search).get("ep");
+  try {
+    const mod = await import(`/episodes/${ep}.js`);
+    const film = await mod.build();
+    window.info = { duration: film.duration, fps: mod.meta.fps, marks: film.marks, w: mod.meta.width, h: mod.meta.height };
+    // one frame = one pure function call; PNG data URL comes back to the driver
+    window.frame = (i) => { film.update(i / mod.meta.fps); return film.st.out.toDataURL("image/png"); };
+    window.ready = true;
+  } catch (e) { window.error = String(e.stack || e); }
+</script>

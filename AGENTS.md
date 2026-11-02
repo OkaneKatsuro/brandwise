@@ -9,6 +9,7 @@ Turborepo monorepo (pnpm). CLI scripts and tools for marketing.
 Standalone scripts, not workspace packages. Run `tools/bootstrap.sh` once (installs yt-dlp + ffmpeg via Homebrew; the scripts also call it automatically).
 
 - `tools/video-dl.sh <url>...` – download YouTube / Instagram / TikTok video. Prints file paths on stdout. See `.claude/skills/download-video/SKILL.md` for flags and failure handling. Downloads land in `downloads/` (gitignored).
+- `tools/ig-dl.sh post|profile|hashtag ...` – read public Instagram content with Instaloader (anonymous, optional throwaway login); see the download-video skill. Downloads land in `downloads/instagram/`.
 - `tools/creative-preview.sh <image>...` – builds `preview.html` next to the images (all in one folder) and prints an `::inline-vis{file="..."}` line, see "Showing creatives in chat". Images are embedded as data URIs (relative `src` and plain path links break in the chat viewer).
 - `tools/lowpoly/` – low-poly 3D film engine (Three.js in headless Chrome): an episode is a function of time, rendered to MP4 with narration and captions. See its README.
 
