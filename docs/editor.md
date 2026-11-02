@@ -70,6 +70,8 @@ One recorded 18-cycle run (7 experiments, 6 concluded): the agents took the clic
 
 A cycle is: an editor run, an author run if there are open tasks, one scheduler pass, then the clock moves on. The harness decides nothing for the agents. Afterwards it checks the database against the rules that must hold whatever the agents did (no verdict on immature data, separate arm audiences, no unsafe winner, goals untouched, a journal entry per run, a learning per conclusion, tasks claimed by an author) and reports soft results (at most one statistically false adoption, the final incumbent at least as good as the baseline). It exits non-zero when a hard rule fails.
 
+Every agent run is its own bb thread, titled `[lab] editor N` or `[lab] author N`. The harness starts them hidden and archives each one when it finishes, so a long run does not fill the thread list; pass `--keep-threads` to keep them for inspection.
+
 ## Going from the lab to real e-mail
 
 - The loop already judges real events the same way; the difference is the provider. With Resend, an experiment needs two audiences: one segment and one child campaign per arm (`campaign channel set email provider=resend segmentId=...`).

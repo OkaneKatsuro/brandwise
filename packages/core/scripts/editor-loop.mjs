@@ -38,12 +38,14 @@ let editorRuns = 0, authorRuns = 0;
 function agent(role, title, prompt) {
   const file = join(tmp, `${role}-${Date.now()}.txt`);
   writeFileSync(file, prompt);
-  const spawned = JSON.parse(bb("thread", "spawn", "--project", project, "--prompt-file", file, "--title", title, "--permission-mode", "auto", "--json"));
+  const spawned = JSON.parse(bb("thread", "spawn", "--project", project, "--prompt-file", file, "--title", `[lab] ${title}`, "--visibility", "hidden", "--permission-mode", "auto", "--json"));
   const id = spawned.id ?? spawned.thread?.id;
   log(`${role} thread ${id} started`);
   try { bb("thread", "wait", id, "--timeout", "15m"); } catch (e) { log(`${role} thread ${id} did not finish: ${e.message.split("\n")[0]}`); }
   const out = bb("thread", "output", id).replace(/\s+/g, " ").slice(0, 400);
   log(`${role} said: ${out}`);
+  // a lab run is dozens of threads: hide them while they run and archive them when done (--keep-threads keeps them for inspection)
+  if (!process.argv.includes("--keep-threads")) { try { bb("thread", "archive", id); } catch { /* already archived or gone */ } }
   return { id, out };
 }
 
