@@ -932,6 +932,34 @@ export default async function plugin(bb: BbPluginApi) {
     return { dir, files, tool: "instaloader" };
   }
 
+  // Reels and video posts: the same anonymous Instaloader attempt, with the info yt-dlp would have given (printed as one JSON line).
+  const INSTALOADER_VIDEO_PY = [
+    "import json, sys, instaloader",
+    "code, out = sys.argv[1], sys.argv[2]",
+    'L = instaloader.Instaloader(dirname_pattern=out, filename_pattern="{shortcode}", download_pictures=False, download_video_thumbnails=False, download_geotags=False,',
+    '                            download_comments=False, save_metadata=False, post_metadata_txt_pattern="", quiet=True)',
+    "p = instaloader.Post.from_shortcode(L.context, code)",
+    "if not p.is_video: raise SystemExit('this post has no video')",
+    'L.download_post(p, target="")',
+    'print(json.dumps({"uploader": p.owner_username, "title": None, "description": p.caption, "duration": p.video_duration, "like_count": p.likes, "webpage_url": "https://www.instagram.com/p/" + code + "/"}))',
+  ].join("\n");
+  async function instaloaderVideo(link: string) {
+    const u = new URL(link);
+    const m = /^\/(?:[A-Za-z0-9._]{1,30}\/)?(?:p|reel|reels|tv)\/([\w-]{5,30})/.exec(u.pathname);
+    if (u.protocol !== "https:" || !(u.hostname === "instagram.com" || u.hostname.endsWith(".instagram.com")) || !m) throw new Error("not an Instagram post or reel link");
+    const dir = px.join(osx.tmpdir(), "bw-downloads", "instagram");
+    fsx.mkdirSync(dir, { recursive: true });
+    const stdout = await new Promise<string>((resolve, reject) =>
+      cp.execFile("sh", ["-c", 'py="$(head -1 "$(command -v instaloader)" | sed "s/^#!//")"; exec "$py" -c "$IL_CODE" "$@"', "sh", m[1], dir],
+        { env: { ...hostEnv(), IL_CODE: INSTALOADER_VIDEO_PY }, timeout: 180_000, maxBuffer: 1 << 20 },
+        (e, out, stderr) => (e ? reject(new Error(String(stderr || e.message).trim().split("\n").slice(-1)[0])) : resolve(out))),
+    );
+    const file = px.join(dir, `${m[1]}.mp4`);
+    if (!fsx.existsSync(file)) throw new Error("no video file was produced");
+    const raw = JSON.parse(stdout.trim().split("\n").pop() ?? "{}") as Record<string, unknown>;
+    return { file, info: { uploader: raw.uploader, title: raw.title, description: raw.description, durationSeconds: raw.duration, likes: raw.like_count, url: raw.webpage_url } };
+  }
+
   /** Generation parameters from CLI flags. Spawned without a shell, but the lengths and the model name are still bounded. */
   // The provider uploads whatever path it is given, so only media files (or ids of already uploaded ones) are passed on.
   const MEDIA_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm", ".mp3", ".wav", ".m4a"]);
@@ -1133,7 +1161,9 @@ export default async function plugin(bb: BbPluginApi) {
           if (!link) return { exitCode: 1, stderr: usage };
           if (args.includes("--cookies")) return { exitCode: 1, stderr: `The session is not chosen per call: ${NEEDS_SESSION}` };
           const campaignId = await campaign();
-          const got = await withSession(c, campaignId, (session) => downloadVideo(link, session));
+          // Instagram: anonymous Instaloader first; yt-dlp with the connected session only when that is refused (and for TikTok and YouTube)
+          const got = await instaloaderVideo(link).catch((first: Error) => withSession(c, campaignId, (session) => downloadVideo(link, session))
+            .catch((second: Error) => { throw new Error(/instagram\.com/.test(link) ? `Instaloader (anonymous): ${first.message}. Fallback with the connected session: ${second.message}` : second.message); }));
           const a = await c.assets.save({
             campaignId, file: got.file, role: "reference", origin: "imported",
             provenance: { source: link, ...got.info }, rights: { note: "third-party content, reference only, do not republish" }, createdBy: "cli",
