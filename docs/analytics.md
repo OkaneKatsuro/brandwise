@@ -30,6 +30,16 @@ Not planned: LLM or token cost accounting (subscriptions make it meaningless).
 | D4 | A send-back overwrote `review_note`; an approval stored neither who nor when. | `entry_event`: one row per action (created, edited, approved, changes_requested, unapproved, cancelled, published, failed, needs_manual) with actor, statuses, note, reason and data. `content_calendar.approved_at/approved_by`. `bb brandwise calendar history <id>`. |
 | D6 | UTM only on `entry.link` of plain-text e-mails, with the entry id in `utm_campaign`; HTML, templates and Telegram untagged. | Every http(s) link in e-mail (text, HTML, templates) and Telegram posts gets `utm_source`, `utm_medium`, `utm_campaign=<campaign slug>` and `utm_content=<entry id>`; parameters already on a link are kept; merge tags, `mailto:` and the unsubscribe link are left alone. |
 
+## Step 2: one metrics layer
+
+- `packages/core/src/metrics`: the vocabulary (sends, exposures, clicks, complaints, unsubscribes, bounces, reactions, comments, shares, saves, video_views, leads, orders, revenue, spend; all counts, rates are computed) and the port `MetricsSource`. A source names the channels it measures and the metrics it can report. A metric no source reports is missing, never 0.
+- Two kinds of source. **Live** sources keep their own event history and answer for any moment (`at`): e-mail. **Pull** sources only know current totals (`pull`): each pull stores a snapshot of the running totals in `entry_metric`, so history builds up and every read can be "as of" a moment. A repeated pull at the same moment stores nothing; a source cannot write numbers for entries outside its channels.
+- One number per metric per entry: the first source that reports it wins, sources are never added up. An entry's start is what the source says, or its publish time from the review history (step 1) when the source cannot tell.
+- The regulator reads only from here. An experiment may run on any channel where a source measures exposures and clicks, with both arms on the same channel; the rails are unchanged (`docs/editor.md`).
+- E-mail is the first source (`email/metrics-source.ts`). A number its providers cannot emit is missing: Resend reports unsubscribes as contact events, so the unsubscribe guard no longer reads a fake 0 there (D1).
+- CLI: `bb brandwise metrics sources | entry <id> | campaign [--campaign <c>] [--as-of <ISO>]`, `metrics pull [--source <id>] [--days 30]`. No pull source exists yet; the automation that pulls comes with the first one (step 3).
+- Not changed: `write_variant` tasks still create e-mail entries; arms on other channels are proposed with entries made by hand or by an author.
+
 Notes on step 1:
 - The actor is a label, not a verified identity: `ui` is a person on a page, `cli` or `cli:<label>` the command line (`--as <label>`), `auto` the tier-1 approval, `scheduler` publishing. The CLI refuses `--as ui`, `auto`, `scheduler` and `unknown`.
 - Send-back reasons are a closed list: claims, facts, tone, brand, visual, legal, typo, offer, other. The approval dialog offers them; the CLI takes `--reason`.

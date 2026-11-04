@@ -7,7 +7,7 @@ import { compareRates, minDetectableLift, normalCdf, requiredPerArm, wilson } fr
 const R = DEFAULT_RAILS;
 const T0 = "2026-01-01T00:00:00.000Z";
 const at = (hoursAfter: number) => new Date(Date.parse(T0) + hoursAfter * 3_600_000);
-const arm = (over: Partial<ArmData> = {}): ArmData => ({ entryId: "e", sentAt: T0, delivered: 1000, clicks: 30, complaints: 0, unsubscribes: 0, ...over });
+const arm = (over: Partial<ArmData> = {}): ArmData => ({ entryId: "e", sentAt: T0, exposures: 1000, clicks: 30, complaints: 0, unsubscribes: 0, ...over });
 
 test("stats: normal CDF, Wilson interval and the two-proportion test agree with known values", () => {
   assert.ok(Math.abs(normalCdf(1.96) - 0.975) < 1e-3 && Math.abs(normalCdf(0) - 0.5) < 1e-6);
@@ -46,10 +46,10 @@ test("judge: hysteresis. A small or insignificant difference changes nothing, th
   const same = judge(arm(), arm({ clicks: 33 }), at(48), R);
   assert.equal(same.verdict, "inconclusive");
   // significant but below the minimum lift: p < 0.05 and still not worth a change
-  const tiny = judge(arm({ delivered: 200_000, clicks: 6000 }), arm({ delivered: 200_000, clicks: 6400 }), at(48), R);
+  const tiny = judge(arm({ exposures: 200_000, clicks: 6000 }), arm({ exposures: 200_000, clicks: 6400 }), at(48), R);
   assert.ok(tiny.stats!.p < 0.05 && tiny.stats!.lift! < R.minRelativeLift);
   assert.equal(tiny.verdict, "inconclusive");
-  assert.equal(judge(arm({ delivered: 150 }), arm({ delivered: 150, clicks: 60 }), at(48), R).verdict, "inconclusive", "too few delivered");
+  assert.equal(judge(arm({ exposures: 150 }), arm({ exposures: 150, clicks: 60 }), at(48), R).verdict, "inconclusive", "too few exposures");
 });
 
 test("judge: guards are limits, not goals. A winner that breaks one loses; two unsafe arms freeze", () => {
@@ -59,7 +59,7 @@ test("judge: guards are limits, not goals. A winner that breaks one loses; two u
   assert.equal(judge(clickbait, arm({ clicks: 31 }), at(48), R).verdict, "B", "an unsafe control gives way to a safe challenger");
   assert.equal(judge(clickbait, clickbait, at(48), R).verdict, "freeze");
   assert.equal(judge(arm(), arm({ clicks: 90, unsubscribes: 25 }), at(48), R).verdict, "A", "unsubscribes are guarded too");
-  assert.equal(judge(arm({ delivered: 50 }), arm({ delivered: 50, complaints: 5 }), at(48), R).verdict, "inconclusive", "a guard needs a minimum sample to count");
+  assert.equal(judge(arm({ exposures: 50 }), arm({ exposures: 50, complaints: 5 }), at(48), R).verdict, "inconclusive", "a guard needs a minimum sample to count");
 });
 
 test("canPropose: frozen, one running at a time, cooldown after an adoption", () => {
