@@ -43,6 +43,9 @@ run("short links: issued on publishing, resolved once per request, counted as un
 
     const metrics = createMetrics({ core, sources: [links.metricsSource()] });
     assert.deepEqual((await metrics.entry(entry.id, new Date(Date.now() + 1000))).values, { clicks: 2 }, "unique people, not requests or previews");
+    // one machine rotating its browser string adds at most three visitors
+    for (let i = 0; i < 6; i++) await links.resolve(code, { method: "GET", userAgent: `${CHROME} r${i}`, ip: "192.0.2.9" });
+    assert.deepEqual((await metrics.entry(entry.id, new Date(Date.now() + 1000))).values, { clicks: 5 }, "2 people + 3 of the six from one address");
     assert.deepEqual((await metrics.entry(entry.id, new Date(before.getTime() - 60_000))).values, { clicks: 0 }, "as of before the clicks");
     const raw = (await core.pool.query("select c.* from link_click c join short_link l on l.id = c.link_id where l.entry_id = $1", [entry.id])).rows;
     assert.ok(raw.every((r: any) => !JSON.stringify(r).includes("203.0.113.5") && !JSON.stringify(r).includes("Chrome")), "no address or browser string is stored");

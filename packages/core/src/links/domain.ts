@@ -28,6 +28,15 @@ export const isBot = (method: string, userAgent: string | null | undefined) => m
 /** A visitor is a salted hash of address and browser, so unique clicks can be counted without storing either. */
 export const visitorOf = (key: string, ip: string | null, userAgent: string | null) =>
   createHmac("sha256", key).update(`visitor:${ip ?? ""}:${userAgent ?? ""}`).digest("hex").slice(0, 24);
+/** The address alone, salted: one address adds at most MAX_VISITORS_PER_SOURCE visitors to an entry (a household, an office). */
+export const sourceOf = (key: string, ip: string | null) => createHmac("sha256", key).update(`source:${ip ?? ""}`).digest("hex").slice(0, 24);
+export const MAX_VISITORS_PER_SOURCE = 3;
+
+/**
+ * The client's address as our own proxy saw it: the right-most X-Forwarded-For entry, which the proxy in front of the instance
+ * appends. Entries left of it are whatever the client sent and are never trusted.
+ */
+export const clientAddress = (forwardedFor: string | null | undefined): string | null => forwardedFor?.split(",").at(-1)?.trim() || null;
 
 /** Replace every http(s) URL of a text with what `fn` returns for it (sentence punctuation after a URL stays outside it). */
 export async function replaceUrls(text: string, fn: (url: string) => Promise<string>): Promise<string> {

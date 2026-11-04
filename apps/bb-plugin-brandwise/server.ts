@@ -16,7 +16,7 @@ import { createVideo, videoContract } from "./video.ts";
 import { createEmailTemplates, templatesContract } from "./email-templates.ts";
 import { sleep, slug } from "./util.ts";
 import { connectorsFrom, runDue, SHORTENED_CHANNELS } from "./core/publish.ts";
-import { createLinks } from "./core/links/index.ts";
+import { clientAddress, createLinks } from "./core/links/index.ts";
 import { createEmail } from "./core/email/index.ts";
 import { createRegulator } from "./core/regulator/index.ts";
 import { regulatorStore } from "./core/regulator/store.ts";
@@ -318,8 +318,9 @@ export default async function plugin(bb: BbPluginApi) {
   // target is only ever a URL we stored when publishing (no open redirect). Previews and crawlers are recorded as bots, not clicks.
   for (const method of ["GET", "HEAD"]) {
     bb.http.route(method, "/l", async (ctx) => {
-      const forwarded = ctx.req.header("x-forwarded-for")?.split(",")[0]?.trim() || ctx.req.header("cf-connecting-ip") || null;
-      const url = links ? await links.resolve(ctx.req.query("c") ?? "", { method, userAgent: ctx.req.header("user-agent") ?? null, ip: forwarded }).catch(() => null) : null;
+      // only the entry our own proxy appended; anything left of it is the client's to forge
+      const ip = clientAddress(ctx.req.header("x-forwarded-for"));
+      const url = links ? await links.resolve(ctx.req.query("c") ?? "", { method, userAgent: ctx.req.header("user-agent") ?? null, ip }).catch(() => null) : null;
       if (url === null) return new Response("This link does not exist.", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
       return new Response(null, { status: 302, headers: { location: url, "cache-control": "no-store", "referrer-policy": "no-referrer-when-downgrade" } });
     }, { auth: "none" });

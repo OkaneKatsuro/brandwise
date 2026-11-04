@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { telegram } from "../connector-telegram.ts";
 import type { PublishInput } from "../publish.ts";
-import { codeOf, isBot, newLinkId, replaceUrls, verifyCode } from "./domain.ts";
+import { clientAddress, codeOf, isBot, newLinkId, replaceUrls, verifyCode } from "./domain.ts";
 
 const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
@@ -21,6 +21,13 @@ test("bots: previews, crawlers, scripts and HEAD requests are not clicks; a brow
   assert.equal(isBot("HEAD", CHROME), true);
   assert.equal(isBot("GET", CHROME), false);
   assert.equal(isBot("GET", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Telegram-iOS"), false, "a person in Telegram's in-app browser");
+});
+
+test("the client address is the one our proxy appended, never what the client wrote before it", () => {
+  assert.equal(clientAddress("6.6.6.6, 203.0.113.5"), "203.0.113.5", "a forged left entry is ignored");
+  assert.equal(clientAddress("203.0.113.5"), "203.0.113.5");
+  assert.equal(clientAddress(undefined), null);
+  assert.equal(clientAddress(""), null);
 });
 
 test("replaceUrls keeps sentence punctuation outside the link", async () => {

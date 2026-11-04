@@ -2,9 +2,9 @@
 // E-mail keeps its links as they are: the provider counts clicks there, and redirects through an unknown domain hurt delivery.
 import type pg from "pg";
 import type { MetricsSource, Snapshot } from "../metrics/domain.ts";
-import { codeOf, isBot, newLinkId, verifyCode, visitorOf } from "./domain.ts";
+import { codeOf, isBot, MAX_VISITORS_PER_SOURCE, newLinkId, sourceOf, verifyCode, visitorOf } from "./domain.ts";
 
-export { isBot, replaceUrls } from "./domain.ts";
+export { clientAddress, isBot, replaceUrls } from "./domain.ts";
 
 export function createLinks(deps: {
   pool: pg.Pool;
@@ -33,7 +33,7 @@ export function createLinks(deps: {
       if (!id) return null;
       const row = (await q("select url from short_link where id = $1", [id]))[0];
       if (!row) return null;
-      await q("insert into link_click (link_id, visitor, bot) values ($1,$2,$3)", [id, visitorOf(deps.key, req.ip, req.userAgent), isBot(req.method, req.userAgent)]);
+      await q("insert into link_click (link_id, visitor, source, bot) values ($1,$2,$3,$4)", [id, visitorOf(deps.key, req.ip, req.userAgent), sourceOf(deps.key, req.ip), isBot(req.method, req.userAgent)]);
       return row.url as string;
     },
     /** Per link of an entry: where it leads, people (unique visitors) and bot requests. */
@@ -44,7 +44,10 @@ export function createLinks(deps: {
          from short_link l left join link_click c on c.link_id = l.id where l.entry_id = $1 group by l.id, l.url order by l.created_at`, [entryId]))
         .map((r: any) => ({ url: r.url, clicks: Number(r.clicks), visitors: Number(r.visitors), bots: Number(r.bots) }));
     },
-    /** Clicks as a live metrics source: unique human visitors over all links of an entry, up to the moment asked. */
+    /**
+     * Clicks as a live metrics source: unique human visitors over all links of an entry, up to the moment asked, with at most
+     * MAX_VISITORS_PER_SOURCE counted per address (so one machine rotating its browser string cannot inflate a test).
+     */
     metricsSource(): MetricsSource {
       return {
         id: "links",
@@ -53,10 +56,14 @@ export function createLinks(deps: {
         async at(entries, asOf) {
           if (entries.length === 0) return [];
           const rows = await q(
-            `select l.entry_id, count(distinct c.visitor) filter (where not c.bot and c.at <= $2) as visitors
-             from short_link l left join link_click c on c.link_id = l.id where l.entry_id = any($1::text[]) group by l.entry_id`,
-            [entries.map((e) => e.id), asOf.toISOString()]);
-          // an entry with short links and no click has 0 clicks; one without short links is unknown (left out)
+            `select l.entry_id, coalesce(sum(least(coalesce(v.n, 0), $3)), 0) as visitors
+             from (select distinct entry_id from short_link where entry_id = any($1::text[])) l
+             left join (select s.entry_id, c.source, count(distinct c.visitor) as n
+                        from short_link s join link_click c on c.link_id = s.id
+                        where s.entry_id = any($1::text[]) and not c.bot and c.at <= $2 group by s.entry_id, c.source) v on v.entry_id = l.entry_id
+             group by l.entry_id`,
+            [entries.map((e) => e.id), asOf.toISOString(), MAX_VISITORS_PER_SOURCE]);
+          // an entry with short links and no click has 0 clicks (LEAST skips nulls, hence the coalesce); one without short links is unknown
           return rows.map((r: any): Snapshot => ({ entryId: r.entry_id, values: { clicks: Number(r.visitors) } }));
         },
       };
