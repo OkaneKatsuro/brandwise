@@ -68,6 +68,8 @@ apply() {
    if [ -n "${RESEND_API_KEY:-}" ]; then cfg resendApiKey "$RESEND_API_KEY"; fi
    if [ -n "${RESEND_WEBHOOK_SECRET:-}" ]; then cfg resendWebhookSecret "$RESEND_WEBHOOK_SECRET"; fi
    if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then cfg telegramBotToken "$TELEGRAM_BOT_TOKEN"; fi
+   # the public address of the short-link redirect (docs/analytics.md, step 3); unset = links in posts are not shortened
+   if [ -n "${LINKS_BASE_URL:-}" ]; then cfg linksBaseUrl "$LINKS_BASE_URL"; fi
    # optional video engine (agent-written Remotion templates); empty until its npm deps are installed
    if [ -f "$root/packages/video-remotion/node_modules/.package-lock.json" ]; then cfg videoEnginePath "$root/packages/video-remotion"; fi
    if [ -d "$root/packages/email-engine/node_modules/mjml" ]; then cfg emailEnginePath "$root/packages/email-engine"; fi

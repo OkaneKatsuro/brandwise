@@ -5,7 +5,7 @@
 import { defineRpcContract, type BbPluginApi, type PluginSettingDescriptor } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { cookieJarFor, createCore, downloadResult, isFailed, PROVIDERS, REVIEW_REASONS, sessionFromCookieJar, STATUSES, type Core, type GenSpec, type Provider, type Scope, type SettingValue } from "./core/index.ts";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import * as cp from "node:child_process";
 import * as fsx from "node:fs";
 import * as osx from "node:os";
@@ -15,7 +15,8 @@ import { productCli } from "./product.ts";
 import { createVideo, videoContract } from "./video.ts";
 import { createEmailTemplates, templatesContract } from "./email-templates.ts";
 import { sleep, slug } from "./util.ts";
-import { connectorsFrom, runDue } from "./core/publish.ts";
+import { connectorsFrom, runDue, SHORTENED_CHANNELS } from "./core/publish.ts";
+import { createLinks } from "./core/links/index.ts";
 import { createEmail } from "./core/email/index.ts";
 import { createRegulator } from "./core/regulator/index.ts";
 import { regulatorStore } from "./core/regulator/store.ts";
@@ -237,6 +238,9 @@ export default async function plugin(bb: BbPluginApi) {
       resendWebhookSecret: { type: "string", label: "Resend webhook signing secret", description: "whsec_... of the webhook that points at /api/v1/plugins/brandwise/http/webhooks/email/resend.", default: "", secret: true },
       telegramBotToken: { type: "string", label: "Telegram bot token", description: "From @BotFather. Switches the telegram channel on; each campaign picks its chat (campaign channel set telegram chatId=...).", default: "", secret: true },
     }),
+    section("links", "Short links", "Own short links in posts, so clicks are counted per calendar entry in channels that do not report them (docs/analytics.md).", {
+      linksBaseUrl: { type: "string", label: "Public address", description: "Where the internet reaches this plugin's route /api/v1/plugins/brandwise/http/l, e.g. https://go.example.com/l behind a tunnel or proxy. Empty = links in posts are tagged but not shortened, and their clicks are not counted. Links stop working when the encryption key is replaced.", default: "" },
+    }),
     section("database", "Database", "Where campaigns, the calendar and asset records live.", {
       databaseUrl: { type: "string", label: "Postgres URL", default: "", secret: true },
     }),
@@ -297,14 +301,29 @@ export default async function plugin(bb: BbPluginApi) {
     pool: core.pool, salt: emailSalt, providers: { resendApiKey: cfg.resendApiKey || undefined, resendWebhookSecret: cfg.resendWebhookSecret || undefined },
     sim: cfg.simEnabled ? { now: async () => new Date(Date.now() + (await regulatorStore(core!.pool).clockOffset()) * 1000) } : undefined,
   });
-  // Numbers of calendar entries from every source (core/metrics): e-mail today, more channels with each source (docs/analytics.md).
-  const metrics = core === null ? null : createMetrics({ core, sources: email ? [email.metricsSource()] : [] });
+  // Own short links in posts (core/links): the redirect below counts each click for its entry. The key signs codes and salts visitors.
+  const links = core === null ? null : createLinks({
+    pool: core.pool, key: createHmac("sha256", cfg.secretKey).update("brandwise-links").digest("hex"),
+    baseUrl: () => cfg.linksBaseUrl.trim().replace(/\/+$/, "") || null, channels: SHORTENED_CHANNELS,
+  });
+  // Numbers of calendar entries from every source (core/metrics): e-mail and short links, more channels with each source (docs/analytics.md).
+  const metrics = core === null ? null : createMetrics({ core, sources: [...(email ? [email.metricsSource()] : []), ...(links ? [links.metricsSource()] : [])] });
   // The editor-in-chief regulator (rails, signals, experiments, journal, tasks) and the development clock.
   const regulator = core !== null && metrics !== null ? createRegulator({ core, metrics, library: () => emailTemplates.library() }) : null;
   const editorCli = createEditorCli({ core: need, regulator: () => regulator });
-  const metricsCli = createMetricsCli({ core: need, metrics: () => metrics, now: async () => (regulator ? regulator.clock.now() : new Date()) });
+  const metricsCli = createMetricsCli({ core: need, metrics: () => metrics, links: () => links, now: async () => (regulator ? regulator.clock.now() : new Date()) });
   /** Every publishing connector that is switched on. A channel without one waits as "Publish by hand". */
-  const allConnectors = () => [...connectorsFrom(cfg), ...(email && email.providers.length > 0 ? [email.connector()] : [])];
+  const allConnectors = () => [...connectorsFrom(cfg, { shorten: links?.enabled() ? links.shorten : undefined }), ...(email && email.providers.length > 0 ? [email.connector()] : [])];
+  // The short-link redirect. Public by nature, so no bb login: a code carries our signature, a code we did not issue is a 404, and the
+  // target is only ever a URL we stored when publishing (no open redirect). Previews and crawlers are recorded as bots, not clicks.
+  for (const method of ["GET", "HEAD"]) {
+    bb.http.route(method, "/l", async (ctx) => {
+      const forwarded = ctx.req.header("x-forwarded-for")?.split(",")[0]?.trim() || ctx.req.header("cf-connecting-ip") || null;
+      const url = links ? await links.resolve(ctx.req.query("c") ?? "", { method, userAgent: ctx.req.header("user-agent") ?? null, ip: forwarded }).catch(() => null) : null;
+      if (url === null) return new Response("This link does not exist.", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
+      return new Response(null, { status: 302, headers: { location: url, "cache-control": "no-store", "referrer-policy": "no-referrer-when-downgrade" } });
+    }, { auth: "none" });
+  }
   for (const p of email?.providers ?? []) {
     if (!p.events) continue;
     // the provider signs each call, so the route needs no bb login (a signature failure stores nothing)
@@ -740,6 +759,7 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise calendar approve|cancel <id>",
     "  (calendar add, edit, request-changes, unapprove, approve and cancel take [--as <label>]: the history records cli:<label>)",
     "  bb brandwise metrics sources | entry <id> | campaign [--campaign <c>] [--as-of <ISO>]   (numbers of published entries from every source, any channel; unknown is shown as missing, never 0)",
+    "  bb brandwise metrics links <entry>   (our short links of a published post: where each leads, clicks, unique visitors, bot requests)",
     "  bb brandwise metrics pull [--source <id>] [--days 30]   (ask pull sources for current totals of entries published in the last days and store them; safe to repeat)",
     "  bb brandwise editor signals [--campaign <c>] [--as-of <ISO>]   (what the editor sees: goals, smoothed rates, experiments, what is allowed now)",
     "  bb brandwise editor experiments list|propose --a <entry> --b <entry> --hypothesis \"...\"|evaluate <id>   (A/B on any channel a metrics source measures with exposures and clicks; the rails judge, nobody can overrule)",

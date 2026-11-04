@@ -53,6 +53,7 @@ Times without an offset are read in the server's local time and shown in UTC.
 | `bb brandwise metrics entry <id> [--as-of <ISO>]` | The numbers of one entry from every source that measures its channel (exposures, clicks, ...). A metric that is not listed is unknown, not 0. |
 | `bb brandwise metrics campaign [--campaign <c>] [--as-of <ISO>]` | The same for every published entry of the campaign (an always-on base includes the campaigns under it). |
 | `bb brandwise metrics sources` | Which sources exist, the channels they measure and what they can report. |
+| `bb brandwise metrics links <id>` | Our short links of a published post: where each leads, clicks, unique visitors, and requests by previews and crawlers (not counted). |
 
 Read these before you say how a post or an e-mail performed; never estimate numbers yourself.
 
