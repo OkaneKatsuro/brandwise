@@ -18,6 +18,17 @@ plugin_dir="$(abs "$BW_PLUGIN_DIR")"
 unset BB_THREAD_ID BB_PROJECT_ID BB_ENVIRONMENT_ID BB_THREAD_STORAGE
 export BB_SERVER_URL="http://127.0.0.1:$BW_SERVER_PORT" BB_HOST_DAEMON_PORT="$BW_DAEMON_PORT"
 
+# bb installed only as the desktop app has no `bb` or `bb-app` on PATH: run the copies bundled in bb.app.
+bb_app_dist="/Applications/bb.app/Contents/Resources/app.asar.unpacked/node_modules/bb-app/dist"
+bb_runtime="/Applications/bb.app/Contents/MacOS/bb"
+bb_app_cmd=(bb-app)
+if ! command -v bb-app >/dev/null 2>&1 && [ -f "$bb_app_dist/bb-app.js" ]; then
+  bb_app_cmd=(env ELECTRON_RUN_AS_NODE=1 "$bb_runtime" "$bb_app_dist/bb-app.js")
+fi
+if ! command -v bb >/dev/null 2>&1 && [ -f "$bb_app_dist/bb.js" ]; then
+  bb() { BB_DATA_DIR="$data_dir" ELECTRON_RUN_AS_NODE=1 "$bb_runtime" "$bb_app_dist/bb.js" "$@"; }
+fi
+
 # `bb status` exits 0 even when nothing listens, so ask the port itself (000 = no answer)
 running() { [ "$(curl -s -m 2 -o /dev/null -w '%{http_code}' "$BB_SERVER_URL/")" != 000 ]; }
 
@@ -28,7 +39,7 @@ start() {
   # bb refuses Host headers other than localhost/IPs and the hostname in BB_APP_URL (forbidden_host)
   if [ -n "${BW_TAILNET_HTTP_PORT:-}" ]; then export BB_APP_URL="http://$(tailnet_host):$BW_TAILNET_HTTP_PORT"; fi
   echo "starting bb-app (data dir $data_dir)"
-  nohup bb-app --data-dir "$data_dir" --server-port "$BW_SERVER_PORT" \
+  nohup "${bb_app_cmd[@]}" --data-dir "$data_dir" --server-port "$BW_SERVER_PORT" \
     --host-daemon-port "$BW_DAEMON_PORT" --no-in-app-updates \
     >"$data_dir/logs/bb-app.out" 2>&1 &
   for _ in $(seq 1 60); do running && return; sleep 1; done
@@ -91,7 +102,15 @@ apply() {
 SCHEDULER_NAME="BrandWise scheduler"
 SCHEDULER_SCRIPT='export BB_SERVER_URL="http://127.0.0.1:${BB_SERVER_PORT}" BB_CLI="${BB_CLI_DIR}/bb"
 "$BB_CLI" brandwise calendar run-due'
+# Automations and agent threads need a project. A fresh instance has none: create one rooted at the data dir, where AGENTS.md lives.
+ensure_project() {
+  if [ "$(bb project list --json | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')" = 0 ]; then
+    bb project create --name "${BW_PROJECT_NAME:-BrandWise}" --root "$data_dir" >/dev/null
+    echo "created project ${BW_PROJECT_NAME:-BrandWise} ($data_dir)"
+  fi
+}
 ensure_scheduler() {
+  ensure_project
   local project id
   project=$(bb project list --json | python3 -c 'import json,sys;print(json.load(sys.stdin)[0]["id"])')
   id=$(bb automation list --project "$project" --json | python3 -c 'import json,sys;print(next((a["id"] for a in json.load(sys.stdin) if a["name"]=="'"$SCHEDULER_NAME"'"),""))')
