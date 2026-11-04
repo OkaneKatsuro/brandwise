@@ -40,7 +40,11 @@ export function createMetricsCli(deps: { core: () => Core; metrics: () => Metric
       const c = await deps.core().campaigns.resolve(val(args, "--campaign"));
       const entries = await m.published(c.id);
       const numbers = await m.forEntries(entries, asOf);
-      return reply(numbers, numbers.map((x, i) => fmt(x, entries[i].title)).join("\n") || `Nothing published in ${c.name} yet.`);
+      if (numbers.length === 0) return reply(numbers, `Nothing published in ${c.name} yet.`);
+      // the funnel of the campaign: only metrics some source reported, summed over the entries that have them
+      const total = (k: (typeof METRIC_NAMES)[number]) => { const have = numbers.filter((x) => x.values[k] !== undefined); return have.length ? `${k} ${have.reduce((t, x) => t + x.values[k]!, 0)} (${have.length} entries)` : null; };
+      const funnel = (["exposures", "clicks", "visits", "leads", "orders", "revenue"] as const).map(total).filter(Boolean).join(", ");
+      return reply(numbers, `${numbers.map((x, i) => fmt(x, entries[i].title)).join("\n")}\nTotal: ${funnel || "no numbers yet"}`);
     }
     if (action === "links") {
       const id = positional(args.slice(2))[0];

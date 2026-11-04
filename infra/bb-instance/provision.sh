@@ -93,17 +93,27 @@ apply() {
 SCHEDULER_NAME="BrandWise scheduler"
 SCHEDULER_SCRIPT='export BB_SERVER_URL="http://127.0.0.1:${BB_SERVER_PORT}" BB_CLI="${BB_CLI_DIR}/bb"
 "$BB_CLI" brandwise calendar run-due'
-ensure_scheduler() {
+# Pull sources (GA4, later ad and social platforms) only know current totals: an hourly pull stores a snapshot, so history builds up
+# (docs/analytics.md, step 2). Success prints nothing; a failing source exits 1 with its error.
+METRICS_NAME="BrandWise metrics"
+METRICS_SCRIPT='export BB_SERVER_URL="http://127.0.0.1:${BB_SERVER_PORT}" BB_CLI="${BB_CLI_DIR}/bb"
+"$BB_CLI" brandwise metrics pull >/dev/null'
+# ensure_automation <name> <cron> <script> <timeout>: created once, its script refreshed on every apply
+ensure_automation() {
   local project id
   project=$(bb project list --json | python3 -c 'import json,sys;print(json.load(sys.stdin)[0]["id"])')
-  id=$(bb automation list --project "$project" --json | python3 -c 'import json,sys;print(next((a["id"] for a in json.load(sys.stdin) if a["name"]=="'"$SCHEDULER_NAME"'"),""))')
+  id=$(bb automation list --project "$project" --json | python3 -c 'import json,sys;print(next((a["id"] for a in json.load(sys.stdin) if a["name"]==sys.argv[1]),""))' "$1")
   if [ -z "$id" ]; then
-    bb automation create --project "$project" --name "$SCHEDULER_NAME" --cron "* * * * *" --timezone UTC \
-      --script "$SCHEDULER_SCRIPT" --interpreter bash --timeout 90s >/dev/null
+    bb automation create --project "$project" --name "$1" --cron "$2" --timezone UTC \
+      --script "$3" --interpreter bash --timeout "$4" >/dev/null
   else
-    bb automation update "$id" --project "$project" --script "$SCHEDULER_SCRIPT" --interpreter bash --timeout 90s >/dev/null
+    bb automation update "$id" --project "$project" --script "$3" --interpreter bash --timeout "$4" >/dev/null
     bb automation resume "$id" --project "$project" >/dev/null 2>&1 || true
   fi
+}
+ensure_scheduler() {
+  ensure_automation "$SCHEDULER_NAME" "* * * * *" "$SCHEDULER_SCRIPT" 90s
+  ensure_automation "$METRICS_NAME" "17 * * * *" "$METRICS_SCRIPT" 300s
 }
 
 tailnet_host() { tailscale status --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))'; }

@@ -2,12 +2,12 @@
 // the moment wanted; pull sources are read from the snapshots `pull` stored. The regulator, the CLI and later the pages read from here,
 // never from a channel's own tables.
 import type { CalendarEntry, Core } from "../index.ts";
-import { merge, type EntryMetrics, type EntryRef, type MetricsSource, type Snapshot } from "./domain.ts";
+import { measuresChannel, merge, type EntryMetrics, type EntryRef, type MetricsSource, type Snapshot } from "./domain.ts";
 import { metricsStore } from "./store.ts";
 
 export * from "./domain.ts";
 
-const refOf = (e: CalendarEntry): EntryRef => ({ id: e.id, channel: e.channel, externalId: e.externalId, externalUrl: e.externalUrl });
+const refOf = (e: CalendarEntry): EntryRef => ({ id: e.id, campaignId: e.campaignId, channel: e.channel, externalId: e.externalId, externalUrl: e.externalUrl });
 
 export function createMetrics(deps: { core: Core; sources: MetricsSource[] }) {
   const { core } = deps;
@@ -18,7 +18,7 @@ export function createMetrics(deps: { core: Core; sources: MetricsSource[] }) {
     if (!s.at && !s.pull) throw new Error(`Metrics source "${s.id}" has neither at() nor pull()`);
     ids.add(s.id);
   }
-  const sourcesFor = (channel: string) => deps.sources.filter((s) => s.channels.includes(channel));
+  const sourcesFor = (channel: string) => deps.sources.filter((s) => measuresChannel(s, channel));
 
   /** When each entry was published, from its history: the start of entries whose source cannot tell. */
   async function publishedAt(entryIds: string[]): Promise<Map<string, string>> {
@@ -34,7 +34,7 @@ export function createMetrics(deps: { core: Core; sources: MetricsSource[] }) {
     const order = new Map(deps.sources.map((s, i) => [s.id, i]));
     for (const s of deps.sources) {
       if (!s.at) continue;
-      const mine = entries.filter((e) => s.channels.includes(e.channel));
+      const mine = entries.filter((e) => measuresChannel(s, e.channel));
       if (mine.length) for (const snap of await s.at(mine.map(refOf), asOf)) add(s.id, snap);
     }
     for (const r of await store.latest(entries.map((e) => e.id), asOf)) add(r.source, r.snap);
@@ -77,7 +77,7 @@ export function createMetrics(deps: { core: Core; sources: MetricsSource[] }) {
       const started = await publishedAt(all.map((e) => e.id));
       const out = [];
       for (const s of pullers) {
-        const mine = all.filter((e) => s.channels.includes(e.channel) && Date.parse(started.get(e.id) ?? e.scheduledAt) >= since);
+        const mine = all.filter((e) => measuresChannel(s, e.channel) && Date.parse(started.get(e.id) ?? e.scheduledAt) >= since);
         try {
           const snaps = mine.length ? await s.pull!(mine.map(refOf), now) : [];
           const known = new Set(mine.map((e) => e.id));

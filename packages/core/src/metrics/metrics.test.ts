@@ -31,12 +31,12 @@ test("e-mail source: counts from events up to the moment asked; a number the pro
     eventsFor: async (_ids: string[], opts?: { asOf?: string }) => events.filter((e) => !opts?.asOf || e.at <= opts.asOf),
   } as unknown as EmailStore;
   const src = emailMetricsSource(store);
-  const [early] = await src.at!([{ id: "e1", channel: "email", externalId: null, externalUrl: null }], new Date("2026-11-01T10:00:00.000Z"));
-  const [late] = await src.at!([{ id: "e1", channel: "email", externalId: null, externalUrl: null }], new Date("2026-11-02T10:00:00.000Z"));
+  const [early] = await src.at!([{ id: "e1", campaignId: "c1", channel: "email", externalId: null, externalUrl: null }], new Date("2026-11-01T10:00:00.000Z"));
+  const [late] = await src.at!([{ id: "e1", campaignId: "c1", channel: "email", externalId: null, externalUrl: null }], new Date("2026-11-02T10:00:00.000Z"));
   assert.deepEqual([early.values.clicks, late.values.clicks, late.values.exposures], [0, 1, 1]);
   assert.equal(late.startedAt, "2026-11-01T09:00:00.000Z");
   assert.equal(resendCapabilities.emits.includes("unsubscribed"), false, "precondition: Resend reports unsubscribes as contact events");
   assert.equal("unsubscribes" in late.values, false, "unknown, so the unsubscribe guard is not fooled by a zero");
-  const [before] = await src.at!([{ id: "e1", channel: "email", externalId: null, externalUrl: null }], new Date("2026-11-01T08:30:00.000Z"));
+  const [before] = await src.at!([{ id: "e1", campaignId: "c1", channel: "email", externalId: null, externalUrl: null }], new Date("2026-11-01T08:30:00.000Z"));
   assert.equal(before.startedAt, null, "asked before the send: not started yet");
 });

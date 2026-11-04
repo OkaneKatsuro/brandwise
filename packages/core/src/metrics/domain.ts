@@ -4,9 +4,10 @@
 
 /**
  * The vocabulary. Every metric is a count; rates are computed from counts (clicks / exposures), never stored.
- * `exposures` is the denominator of every rate: delivered e-mails, post views, ad impressions.
+ * `exposures` is the denominator of every rate: delivered e-mails, post views, ad impressions. `visits` are sessions on the
+ * client's site that arrived from the entry's links; `leads` are the site's key events (sign-ups, forms) in those sessions.
  */
-export const METRIC_NAMES = ["sends", "exposures", "clicks", "complaints", "unsubscribes", "bounces", "reactions", "comments", "shares", "saves", "video_views", "leads", "orders", "revenue", "spend"] as const;
+export const METRIC_NAMES = ["sends", "exposures", "clicks", "visits", "complaints", "unsubscribes", "bounces", "reactions", "comments", "shares", "saves", "video_views", "leads", "orders", "revenue", "spend"] as const;
 export type MetricName = (typeof METRIC_NAMES)[number];
 export const isMetricName = (s: string): s is MetricName => (METRIC_NAMES as readonly string[]).includes(s);
 
@@ -22,11 +23,11 @@ export type Snapshot = {
 };
 
 /** The entry as a source sees it: its channel and what the connector got back when it published. */
-export type EntryRef = { id: string; channel: string; externalId: string | null; externalUrl: string | null };
+export type EntryRef = { id: string; campaignId: string; channel: string; externalId: string | null; externalUrl: string | null };
 
 export interface MetricsSource {
   id: string;
-  /** Calendar channels this source measures (`email`, `telegram`, ...). */
+  /** Calendar channels this source measures (`email`, `telegram`, ...); `*` for every channel (web analytics sees visits from any). */
   channels: readonly string[];
   /** Metrics it can report at all; per entry it may report fewer (a provider that cannot see unsubscribes). */
   measures: readonly MetricName[];
@@ -35,6 +36,8 @@ export interface MetricsSource {
   /** Sources that only report current totals (platform APIs): the caller stores the answer as points, so history builds up. */
   pull?(entries: EntryRef[], now: Date): Promise<Snapshot[]>;
 }
+
+export const measuresChannel = (s: Pick<MetricsSource, "channels">, channel: string) => s.channels.includes("*") || s.channels.includes(channel);
 
 /** An entry's numbers merged over every source that measures its channel; `sources` says where each number came from. */
 export type EntryMetrics = { entryId: string; channel: string; startedAt: string | null; values: Partial<Record<MetricName, number>>; sources: Partial<Record<MetricName, string>> };

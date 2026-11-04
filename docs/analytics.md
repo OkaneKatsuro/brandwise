@@ -12,13 +12,13 @@ Each step is one small pull request on top of the previous one.
 
 | # | Branch | What it adds |
 |---|---|---|
-| 1 | `analytics/base` | Fixes the system needs whatever the source: power estimates (D2), review history (D4), UTM on every link (D6). |
-| 2 | `analytics/metrics` | One port `MetricsSource` writing `metric_point` per calendar entry (`roadmap.md` §6). E-mail becomes one adapter; learnings and experiments read from it instead of `email_event`. |
-| 3 | `sources/links` | Own short links with a redirect: clicks per entry in any channel, with nothing to set up on the client's side. |
-| 4 | `sources/site` | GA4: visits and goals by `utm_content`, so leads arrive from the analytics the client already has, without webhooks or CSV. |
-| 5 | `sources/ads-<platform>` | Ad platform reports, read only: spend, impressions, clicks, conversions per ad. |
-| 6 | `sources/social-<platform>` | Organic post metrics. |
-| 7 | `ads/buy`, `ads/acp` | Buying through the calendar and a person's approval, paid through a real ACP adapter. |
+| 1 | `stack/analytics-1-base` | Fixes the system needs whatever the source: power estimates (D2), review history (D4), UTM on every link (D6). |
+| 2 | `stack/analytics-2-metrics` | One port `MetricsSource` writing `metric_point` per calendar entry (`roadmap.md` §6). E-mail becomes one adapter; learnings and experiments read from it instead of `email_event`. |
+| 3 | `stack/analytics-3-links` | Own short links with a redirect: clicks per entry in any channel, with nothing to set up on the client's side. |
+| 4 | `stack/analytics-4-site` | GA4: visits and key events by `utm_content`, so leads arrive from the analytics the client already has, without webhooks or CSV. |
+| 5 | `stack/analytics-5-ads-<platform>` | Ad platform reports, read only: spend, impressions, clicks, conversions per ad. |
+| 6 | `stack/analytics-6-social-<platform>` | Organic post metrics. |
+| 7 | `stack/analytics-7-ads-buy`, `-acp` | Buying through the calendar and a person's approval, paid through a real ACP adapter. |
 
 Not planned: LLM or token cost accounting (subscriptions make it meaningless).
 
@@ -51,6 +51,17 @@ Not planned: LLM or token cost accounting (subscriptions make it meaningless).
 - Needed before it works: a public address that reaches the route (a tunnel or proxy), set as Settings > Short links (`LINKS_BASE_URL` for provisioning). Without it, links are tagged but not shortened. Replacing the plugin's encryption key breaks issued links.
 - CLI: `bb brandwise metrics links <entry>` lists each link with clicks, unique visitors and bot requests.
 - Telegram still reports no views through the Bot API, so a Telegram post has clicks but no exposures, and an A/B test there cannot conclude yet. That needs an exposure source (step 6).
+
+## Step 4: the client's site (GA4)
+
+- `site/ga4.ts` is a pull source for every channel (`*`). It reads Google Analytics 4 through the Data API (`runReport`, read-only scope) by `sessionManualAdContent`, which is the `utm_content` every link carries since step 1. Per entry it reports `visits` (sessions), `leads` (key events), `orders` (purchases) and `revenue`.
+- Leads come from the analytics the client already runs: no webhook, no CSV, no form changes. Setup is two steps.
+  - Once per installation: a Google service account with the Analytics Data API enabled. Its JSON key goes into Settings > Web analytics.
+  - Once per brand: the client adds the service account's e-mail to their GA4 property as a Viewer, and a person names the property on the brand's base campaign: `bb brandwise campaign channel set site propertyId=<id> [leadEvents=generate_lead,sign_up]`. Without `leadEvents`, every key event counts as a lead.
+- Child campaigns inherit the property. Entries of brands without one are not measured: their site numbers are unknown, not 0.
+- An entry of a measured property that GA4 has no row for had no visit yet, so it gets 0. GA4 processes data with a delay of hours, so recent numbers grow after the fact; each pull stores a new snapshot.
+- The hourly automation "BrandWise metrics" (`provision.sh apply`) runs `metrics pull`. `metrics campaign` ends with the campaign's funnel: exposures, clicks, visits, leads, orders and revenue, each over the entries that report it.
+- Leads are not yet a metric the rails decide on: experiments still judge click rate. Leads per entry are small numbers, so a lead test needs the exact test for rare events and enough of them. That comes later.
 
 Notes on step 1:
 - The actor is a label, not a verified identity: `ui` is a person on a page, `cli` or `cli:<label>` the command line (`--as <label>`), `auto` the tier-1 approval, `scheduler` publishing. The CLI refuses `--as ui`, `auto`, `scheduler` and `unknown`.

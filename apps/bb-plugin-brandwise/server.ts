@@ -17,6 +17,7 @@ import { createEmailTemplates, templatesContract } from "./email-templates.ts";
 import { sleep, slug } from "./util.ts";
 import { connectorsFrom, runDue, SHORTENED_CHANNELS } from "./core/publish.ts";
 import { clientAddress, createLinks } from "./core/links/index.ts";
+import { ga4Source, parseServiceAccount } from "./core/site/ga4.ts";
 import { createEmail } from "./core/email/index.ts";
 import { createRegulator } from "./core/regulator/index.ts";
 import { regulatorStore } from "./core/regulator/store.ts";
@@ -241,6 +242,9 @@ export default async function plugin(bb: BbPluginApi) {
     section("links", "Short links", "Own short links in posts, so clicks are counted per calendar entry in channels that do not report them (docs/analytics.md).", {
       linksBaseUrl: { type: "string", label: "Public address", description: "Where the internet reaches this plugin's route /api/v1/plugins/brandwise/http/l, e.g. https://go.example.com/l behind a tunnel or proxy. Empty = links in posts are tagged but not shortened, and their clicks are not counted. Links stop working when the encryption key is replaced.", default: "" },
     }),
+    section("site", "Web analytics", "Visits and leads on the client's own site per calendar entry, read from Google Analytics 4 by utm_content (docs/analytics.md).", {
+      ga4ServiceAccount: { type: "string", label: "GA4 service account key", description: "The JSON key file of a Google service account with the Analytics Data API enabled. Each client adds its client_email to their GA4 property as a Viewer; the property is named per brand (campaign channel set site propertyId=<id> leadEvents=generate_lead). Empty = no site numbers.", default: "", secret: true },
+    }),
     section("database", "Database", "Where campaigns, the calendar and asset records live.", {
       databaseUrl: { type: "string", label: "Postgres URL", default: "", secret: true },
     }),
@@ -307,7 +311,12 @@ export default async function plugin(bb: BbPluginApi) {
     baseUrl: () => cfg.linksBaseUrl.trim().replace(/\/+$/, "") || null, channels: SHORTENED_CHANNELS,
   });
   // Numbers of calendar entries from every source (core/metrics): e-mail and short links, more channels with each source (docs/analytics.md).
-  const metrics = core === null ? null : createMetrics({ core, sources: [...(email ? [email.metricsSource()] : []), ...(links ? [links.metricsSource()] : [])] });
+  // GA4 reads the client's site (visits, key events as leads) per entry; it is asked by `metrics pull`, hourly from an automation.
+  const ga4 = core === null ? null : ga4Source({
+    credentials: () => (cfg.ga4ServiceAccount.trim() ? parseServiceAccount(cfg.ga4ServiceAccount) : null),
+    targetOf: (campaignId) => need().channels.get(campaignId, "site"),
+  });
+  const metrics = core === null ? null : createMetrics({ core, sources: [...(email ? [email.metricsSource()] : []), ...(links ? [links.metricsSource()] : []), ...(ga4 ? [ga4] : [])] });
   // The editor-in-chief regulator (rails, signals, experiments, journal, tasks) and the development clock.
   const regulator = core !== null && metrics !== null ? createRegulator({ core, metrics, library: () => emailTemplates.library() }) : null;
   const editorCli = createEditorCli({ core: need, regulator: () => regulator });
@@ -748,7 +757,7 @@ export default async function plugin(bb: BbPluginApi) {
 
   const usage = [
     "Usage:",
-    "  bb brandwise campaign channel set <channel> <key>=<value>... | unset <channel> | list [--campaign <c>]   (where the campaign publishes, e.g. telegram chatId=@mychannel; a parent campaign's target applies when the campaign has none)",
+    "  bb brandwise campaign channel set <channel> <key>=<value>... | unset <channel> | list [--campaign <c>]   (where the campaign publishes, e.g. telegram chatId=@mychannel; site propertyId=<GA4 id> leadEvents=generate_lead names the brand's analytics; a parent campaign's target applies when the campaign has none)",
     "  bb brandwise campaign list|add <name> --kind <always_on|campaign> [--parent <campaign>] [--from <date>] [--to <date>]",
     "  bb brandwise campaign assign <thread-id> <campaign> | campaign unassign <thread-id>   (link a bb thread to a campaign)",
     "  bb brandwise calendar list [--campaign <c>]",
