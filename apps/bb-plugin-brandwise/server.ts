@@ -4,7 +4,7 @@
 // Approved entries are fired by `calendar run-due`, which a bb automation runs every minute (infra/bb-instance/provision.sh).
 import { defineRpcContract, type BbPluginApi, type PluginSettingDescriptor } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { cookieJarFor, createCore, downloadResult, isFailed, PROVIDERS, sessionFromCookieJar, STATUSES, type Core, type GenSpec, type Provider, type Scope, type SettingValue } from "./core/index.ts";
+import { cookieJarFor, createCore, downloadResult, isFailed, PROVIDERS, REVIEW_REASONS, sessionFromCookieJar, STATUSES, type Core, type GenSpec, type Provider, type Scope, type SettingValue } from "./core/index.ts";
 import { randomBytes } from "node:crypto";
 import * as cp from "node:child_process";
 import * as fsx from "node:fs";
@@ -35,6 +35,7 @@ const entrySchema = z.object({
   scheduledAt: z.string(), tier: tierSchema, status: z.enum(STATUSES), assetId: z.string().nullable(), createdBy: z.string(),
   body: z.string(), link: z.string().nullable(), reviewNote: z.string().nullable(),
   attempts: z.number(), externalId: z.string().nullable(), externalUrl: z.string().nullable(), error: z.string().nullable(),
+  approvedAt: z.string().nullable(), approvedBy: z.string().nullable(),
 });
 const UI_STATUSES = ["draft", "linted", "approved", "archived"] as const;
 const creativeSchema = z.object({
@@ -137,7 +138,7 @@ export const rpcContract = defineRpcContract({
     output: entrySchema,
   },
   calendar_unapprove: { input: z.object({ id: z.string() }), output: entrySchema },
-  calendar_request_changes: { input: z.object({ id: z.string(), note: z.string().trim().min(1).max(2000) }), output: entrySchema },
+  calendar_request_changes: { input: z.object({ id: z.string(), note: z.string().trim().min(1).max(2000), reason: z.enum(REVIEW_REASONS).nullable().optional() }), output: entrySchema },
   calendar_decide: { input: z.object({ id: z.string(), decision: z.enum(["approve", "cancel"]) }), output: entrySchema },
   creatives_list: { input: z.null(), output: z.object({ creatives: z.array(creativeSchema) }) },
   creatives_upload: {
@@ -537,22 +538,22 @@ export default async function plugin(bb: BbPluginApi) {
       return entry;
     },
     calendar_decide: async ({ id, decision }) => {
-      const entry = await need().calendar.decide(id, decision);
+      const entry = await need().calendar.decide(id, decision, "ui");
       await changed();
       return entry;
     },
     calendar_update: async ({ id, ...patch }) => {
-      const entry = await need().calendar.update(id, patch);
+      const entry = await need().calendar.update(id, patch, "ui");
       await changed();
       return entry;
     },
     calendar_unapprove: async ({ id }) => {
-      const entry = await need().calendar.unapprove(id);
+      const entry = await need().calendar.unapprove(id, "ui");
       await changed();
       return entry;
     },
-    calendar_request_changes: async ({ id, note }) => {
-      const entry = await need().calendar.requestChanges(id, note);
+    calendar_request_changes: async ({ id, note, reason }) => {
+      const entry = await need().calendar.requestChanges(id, note, { actor: "ui", reason: reason ?? null });
       await changed();
       return entry;
     },
@@ -728,9 +729,11 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise calendar list [--campaign <c>]",
     "  bb brandwise calendar add <title> --channel <c> --at <ISO date> --tier <1|2|3> [--campaign <c>] [--asset <id>] [--body <text>] [--link <url>]",
     "  bb brandwise calendar edit <id> [--title <t>] [--body <text>] [--link <url>] [--channel <c>] [--at <ISO date>] [--asset <id>]",
-    "  bb brandwise calendar request-changes <id> <note>",
+    "  bb brandwise calendar request-changes <id> <note> [--reason claims|facts|tone|brand|visual|legal|typo|offer|other]",
+    "  bb brandwise calendar history <id>   (every action on the entry: who, when, the send-back notes and reasons)",
     "  bb brandwise calendar unapprove <id>   (upcoming approved entry back to pending_approval; entries whose time has passed accept no action)",
     "  bb brandwise calendar approve|cancel <id>",
+    "  (calendar add, edit, request-changes, unapprove, approve and cancel take [--as <label>]: the history records cli:<label>)",
     "  bb brandwise editor signals [--campaign <c>] [--as-of <ISO>]   (what the editor sees: goals, smoothed rates, experiments, what is allowed now)",
     "  bb brandwise editor experiments list|propose --a <entry> --b <entry> --hypothesis \"...\"|evaluate <id>   (A/B on e-mail; the rails judge, nobody can overrule)",
     "  bb brandwise editor journal read [--limit n] | write \"<text>\" [--kind note]",
@@ -769,8 +772,19 @@ export default async function plugin(bb: BbPluginApi) {
   ].join("\n");
   const vals = (argv: string[], name: string) => argv.flatMap((a, i) => (a === name && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
   const val = (argv: string[], name: string) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
-  const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml"]);
+  const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml", "--reason"]);
   const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, "--json", "--ai", "--stop", "--video", "--image", "--raw"]);
+  /**
+   * Who did it, as recorded in the entry's history: always "cli" or "cli:<label>" from the CLI. `--as` is a label agents give
+   * themselves, not an identity, so it can never claim a reserved actor ("ui" is a person on a page, "auto" and "scheduler" are code).
+   */
+  const RESERVED_ACTORS = new Set(["ui", "auto", "scheduler", "unknown"]);
+  const cliActor = (args: string[]) => {
+    const label = val(args, "--as")?.trim();
+    if (!label) return "cli";
+    if (RESERVED_ACTORS.has(label.toLowerCase())) throw new Error(`--as ${label} is reserved: it names a person on a page or the system`);
+    return `cli:${label.slice(0, 40)}`;
+  };
   /** Positional args = argv without flags and their values. */
   const positional = (argv: string[]) => argv.filter((a, i) => !a.startsWith("--") && !FLAGS_WITH_VALUE.has(argv[i - 1] ?? ""));
   const fmtEntry = (e: { id: string; scheduledAt: string; channel: string; tier: number; status: string; campaignName: string; title: string; reviewNote?: string | null }) =>
@@ -1053,7 +1067,7 @@ export default async function plugin(bb: BbPluginApi) {
           const at = val(args, "--at");
           const tier = Number(val(args, "--tier"));
           if (!title || !channel || !at || ![1, 2, 3].includes(tier)) return { exitCode: 1, stderr: usage };
-          const e = await c.calendar.add({ campaignId: await campaign(), title, channel, scheduledAt: at, tier: tier as 1 | 2 | 3, assetId: val(args, "--asset") ?? null, body: val(args, "--body") ?? "", link: val(args, "--link") ?? null, createdBy: "cli" });
+          const e = await c.calendar.add({ campaignId: await campaign(), title, channel, scheduledAt: at, tier: tier as 1 | 2 | 3, assetId: val(args, "--asset") ?? null, body: val(args, "--body") ?? "", link: val(args, "--link") ?? null, createdBy: cliActor(args) });
           await changed();
           return reply(e, `Added ${fmtEntry(e)}`);
         }
@@ -1064,30 +1078,37 @@ export default async function plugin(bb: BbPluginApi) {
           const e = await c.calendar.update(id, {
             title: val(args, "--title"), body: val(args, "--body"), link: val(args, "--link"), channel: val(args, "--channel"),
             scheduledAt: at, assetId: val(args, "--asset"),
-          });
+          }, cliActor(args));
           await changed();
           return reply(e, fmtEntry(e));
         }
         if (area === "calendar" && action === "unapprove") {
           const id = positional(args.slice(2))[0];
           if (!id) return { exitCode: 1, stderr: usage };
-          const e = await c.calendar.unapprove(id);
+          const e = await c.calendar.unapprove(id, cliActor(args));
           await changed();
           return reply(e, fmtEntry(e));
         }
         if (area === "calendar" && action === "request-changes") {
           const [id, ...note] = positional(args.slice(2));
           if (!id || note.length === 0) return { exitCode: 1, stderr: usage };
-          const e = await c.calendar.requestChanges(id, note.join(" "));
+          const e = await c.calendar.requestChanges(id, note.join(" "), { actor: cliActor(args), reason: val(args, "--reason") ?? null });
           await changed();
           return reply(e, fmtEntry(e));
         }
         if (area === "calendar" && (action === "approve" || action === "cancel")) {
-          const id = rest[0];
+          const id = positional(args.slice(2))[0];
           if (!id) return { exitCode: 1, stderr: usage };
-          const e = await c.calendar.decide(id, action);
+          const e = await c.calendar.decide(id, action, cliActor(args));
           await changed();
           return reply(e, fmtEntry(e));
+        }
+        if (area === "calendar" && action === "history") {
+          const id = positional(args.slice(2))[0];
+          if (!id) return { exitCode: 1, stderr: usage };
+          if (!(await c.calendar.get(id))) return { exitCode: 1, stderr: `No calendar entry with id ${id}` };
+          const h = await c.calendar.history(id);
+          return reply(h, h.map((x) => `${x.at.slice(0, 16)}  ${x.kind.padEnd(17)} ${x.actor.padEnd(12)} ${x.fromStatus ?? ""} -> ${x.toStatus ?? ""}${x.reason ? `  [${x.reason}]` : ""}${x.note ? `  ${x.note}` : ""}`).join("\n") || "No history.");
         }
         if (area === "assets" && action === "add") {
           const file = positional(args.slice(2))[0];
