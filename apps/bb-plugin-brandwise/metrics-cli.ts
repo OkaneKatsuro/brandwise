@@ -11,10 +11,11 @@ const ratio = (m: EntryMetrics, k: "clicks" | "complaints" | "unsubscribes") => 
   const a = m.values[k], b = m.values.exposures;
   return a === undefined || b === undefined || b <= 0 ? null : a / b;
 };
-/** One line per entry: the numbers it has, and which are unknown (no source measures them). */
-const fmt = (m: EntryMetrics, title?: string) => {
+/** One line per entry: the numbers it has; without any, whether a source could measure it at all. */
+const fmt = (m: EntryMetrics, measured: boolean, title?: string) => {
   const have = METRIC_NAMES.filter((k) => m.values[k] !== undefined).map((k) => `${k} ${m.values[k]}`);
-  return `${m.entryId}  ${m.channel.padEnd(9)} started ${m.startedAt?.slice(0, 16) ?? "not yet"}  ${have.length ? have.join(", ") : "no numbers: no source measures this channel"}` +
+  const none = measured ? "no numbers yet (a pull source reports after its next pull, or its token is not set)" : "no numbers: no source measures this channel";
+  return `${m.entryId}  ${m.channel.padEnd(9)} started ${m.startedAt?.slice(0, 16) ?? "not yet"}  ${have.length ? have.join(", ") : none}` +
     `${m.values.exposures !== undefined ? `  (click rate ${pct(ratio(m, "clicks"))})` : ""}${title ? `  "${title}"` : ""}`;
 };
 
@@ -34,7 +35,7 @@ export function createMetricsCli(deps: { core: () => Core; metrics: () => Metric
       const id = positional(args.slice(2))[0];
       if (!id) return { exitCode: 1, stderr: usage };
       const e = await m.entry(id, asOf);
-      return reply(e, fmt(e));
+      return reply(e, fmt(e, m.sourcesFor(e.channel).length > 0));
     }
     if (action === "campaign") {
       const c = await deps.core().campaigns.resolve(val(args, "--campaign"));
@@ -44,7 +45,7 @@ export function createMetricsCli(deps: { core: () => Core; metrics: () => Metric
       // the funnel of the campaign: only metrics some source reported, summed over the entries that have them
       const total = (k: (typeof METRIC_NAMES)[number]) => { const have = numbers.filter((x) => x.values[k] !== undefined); return have.length ? `${k} ${have.reduce((t, x) => t + x.values[k]!, 0)} (${have.length} entries)` : null; };
       const funnel = (["exposures", "reach", "clicks", "visits", "leads", "orders", "revenue", "spend"] as const).map(total).filter(Boolean).join(", ");
-      return reply(numbers, `${numbers.map((x, i) => fmt(x, entries[i].title)).join("\n")}\nTotal: ${funnel || "no numbers yet"}`);
+      return reply(numbers, `${numbers.map((x, i) => fmt(x, m.sourcesFor(x.channel).length > 0, entries[i].title)).join("\n")}\nTotal: ${funnel || "no numbers yet"}`);
     }
     if (action === "links") {
       const id = positional(args.slice(2))[0];

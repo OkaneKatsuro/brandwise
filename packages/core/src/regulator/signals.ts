@@ -41,7 +41,7 @@ export type Signals = {
   frozen: { frozen: boolean; reason: string | null };
   incumbent: { entryId: string; title: string } | null;
   goals: { metric: GoalMetric; kind: "target" | "limit"; value: number; current: number | null; sample: number; gap: number | null; ok: boolean | null }[];
-  recent: { entryId: string; title: string; channel: string; sentAt: string | null; mature: boolean; maturesAt: string | null; exposures: number; clickRate: number | null; clickRateCi: [number, number] | null; complaintRate: number | null; unsubscribeRate: number | null; guard: string | null }[];
+  recent: { entryId: string; title: string; channel: string; sentAt: string | null; mature: boolean; maturesAt: string | null; /** null: no source reported exposures yet */ exposures: number | null; clickRate: number | null; clickRateCi: [number, number] | null; complaintRate: number | null; unsubscribeRate: number | null; guard: string | null }[];
   experiments: { running: (ExperimentView & { verdict: string; reasons: string[]; readyAt: string | null })[]; recentlyConcluded: ExperimentView[] };
   /** What the current audience size can show: effects smaller than `minDetectableLift` end inconclusive. */
   power: { exposuresPerArm: number; clickRate: number; minDetectableLift: number } | null;
@@ -84,7 +84,7 @@ export function buildSignals(input: {
       const has = (m: MetricName) => s.metrics.values[m] !== undefined;
       const per = (k: number | null) => (k !== null && a.exposures > 0 ? k / a.exposures : null);
       const ci = has("clicks") && a.exposures > 0 ? wilson(a.clicks, a.exposures) : null;
-      return { entryId: s.entryId, title: s.title, channel: s.channel, sentAt: s.sentAt, mature: isMature(a, asOf, rails), maturesAt: matureAt(s.sentAt, rails), exposures: a.exposures, clickRate: has("clicks") ? per(a.clicks) : null, clickRateCi: ci ? [ci.low, ci.high] : null, complaintRate: per(a.complaints), unsubscribeRate: per(a.unsubscribes), guard: brokenGuard(a, rails) };
+      return { entryId: s.entryId, title: s.title, channel: s.channel, sentAt: s.sentAt, mature: isMature(a, asOf, rails), maturesAt: matureAt(s.sentAt, rails), exposures: has("exposures") ? a.exposures : null, clickRate: has("clicks") ? per(a.clicks) : null, clickRateCi: ci ? [ci.low, ci.high] : null, complaintRate: per(a.complaints), unsubscribeRate: per(a.unsubscribes), guard: brokenGuard(a, rails) };
     }),
     experiments: { running, recentlyConcluded: experiments.filter((e) => e.status === "concluded").slice(0, 5) },
     power: (() => {
