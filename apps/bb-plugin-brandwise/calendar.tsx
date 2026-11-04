@@ -420,6 +420,8 @@ export function CalendarPage() {
 
 const SELECT = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
 const TEXTAREA = "w-full resize-y rounded-md border border-input bg-background p-2 text-sm";
+/** The same closed list as the core's REVIEW_REASONS: send-backs are counted by reason. */
+const REVIEW_REASONS = ["claims", "facts", "tone", "brand", "visual", "legal", "typo", "offer", "other"] as const;
 
 function EntryDialog({
   entry,
@@ -438,6 +440,7 @@ function EntryDialog({
   const preview = creative === undefined ? null : (creative.dataUri ?? creative.thumb);
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState("");
+  const [reason, setReason] = useState<"" | (typeof REVIEW_REASONS)[number]>("");
   const [form, setForm] = useState({ title: "", body: "", link: "", channel: CHANNELS[0], at: "" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -445,6 +448,7 @@ function EntryDialog({
   useEffect(() => {
     setEditing(false);
     setNote("");
+    setReason("");
     setError(null);
     if (entry !== null) {
       setForm({ title: entry.title, body: entry.body, link: entry.link ?? "", channel: entry.channel, at: toLocalInput(new Date(entry.scheduledAt)) });
@@ -467,7 +471,7 @@ function EntryDialog({
     }
   };
   const decide = (decision: "approve" | "cancel") => entry && run(() => rpc.call("calendar_decide", { id: entry.id, decision }), closeEntry);
-  const sendBack = () => entry && run(() => rpc.call("calendar_request_changes", { id: entry.id, note }), closeEntry);
+  const sendBack = () => entry && run(() => rpc.call("calendar_request_changes", { id: entry.id, note, reason: reason === "" ? null : reason }), closeEntry);
   const save = () => {
     if (entry === null) return;
     const timeChanged = form.at !== toLocalInput(new Date(entry.scheduledAt));
@@ -573,6 +577,12 @@ function EntryDialog({
                   )}
                   <dt className="text-muted-foreground">Created by</dt>
                   <dd>{entry.createdBy}</dd>
+                  {entry.approvedBy === null ? null : (
+                    <>
+                      <dt className="text-muted-foreground">Approved by</dt>
+                      <dd>{entry.approvedBy}{entry.approvedAt ? ` · ${whenOf(entry.approvedAt)}` : ""}</dd>
+                    </>
+                  )}
                 </dl>
               </>
             )}
@@ -587,6 +597,12 @@ function EntryDialog({
                   aria-label="What should change"
                   autoFocus
                 />
+                <select className={SELECT} value={reason} onChange={(e) => setReason(e.target.value as typeof reason)} aria-label="Reason">
+                  <option value="">Reason (optional)</option>
+                  {REVIEW_REASONS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
               </div>
             ) : null}
             {entry.status === "pending_approval" && entry.tier === 3 && !editing && !changing ? (
