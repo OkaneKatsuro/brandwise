@@ -98,22 +98,40 @@ SCHEDULER_SCRIPT='export BB_SERVER_URL="http://127.0.0.1:${BB_SERVER_PORT}" BB_C
 METRICS_NAME="BrandWise metrics"
 METRICS_SCRIPT='export BB_SERVER_URL="http://127.0.0.1:${BB_SERVER_PORT}" BB_CLI="${BB_CLI_DIR}/bb"
 "$BB_CLI" brandwise metrics pull >/dev/null'
-# ensure_automation <name> <cron> <script> <timeout>: created once, its script refreshed on every apply
+# ensure_automation <name> <cron> <script> <timeout in seconds>: created once, changed only when its definition changed.
+# bb renames an automation's script file on every update, adding a UUID to the name, so updating on every apply grows the name until
+# the file system refuses it (ENAMETOOLONG). So an unchanged automation is left alone, and one whose file name has grown long is
+# deleted and created again instead of updated (its run history goes with it).
 ensure_automation() {
-  local project id
+  local name="$1" cron="$2" script="$3" timeout="$4" project state id have_cron have_ms path file
   project=$(bb project list --json | python3 -c 'import json,sys;print(json.load(sys.stdin)[0]["id"])')
-  id=$(bb automation list --project "$project" --json | python3 -c 'import json,sys;print(next((a["id"] for a in json.load(sys.stdin) if a["name"]==sys.argv[1]),""))' "$1")
+  state=$(bb automation list --project "$project" --json | python3 -c '
+import json, sys
+a = next((a for a in json.load(sys.stdin) if a["name"] == sys.argv[1]), None)
+if a:
+    e = a.get("execution", {})
+    print("\t".join([a["id"], a.get("trigger", {}).get("cron", ""), str(e.get("timeoutMs", "")), e.get("storedScriptPath", ""), e.get("scriptFile", "")]))' "$name")
+  IFS=$'\t' read -r id have_cron have_ms path file <<<"$state"
+  if [ -n "$id" ] && [ "$have_cron" = "$cron" ] && [ "$have_ms" = "$((timeout * 1000))" ] && [ -f "$path" ] && [ "$(cat "$path")" = "$script" ]; then
+    bb automation resume "$id" --project "$project" >/dev/null 2>&1 || true
+    return
+  fi
+  if [ -n "$id" ] && [ "${#file}" -gt 120 ]; then
+    bb automation delete "$id" --project "$project" --yes >/dev/null
+    echo "recreated automation \"$name\" (its script file name had grown too long to update)"
+    id=""
+  fi
   if [ -z "$id" ]; then
-    bb automation create --project "$project" --name "$1" --cron "$2" --timezone UTC \
-      --script "$3" --interpreter bash --timeout "$4" >/dev/null
+    bb automation create --project "$project" --name "$name" --cron "$cron" --timezone UTC \
+      --script "$script" --interpreter bash --timeout "${timeout}s" >/dev/null
   else
-    bb automation update "$id" --project "$project" --script "$3" --interpreter bash --timeout "$4" >/dev/null
+    bb automation update "$id" --project "$project" --cron "$cron" --timezone UTC --script "$script" --interpreter bash --timeout "${timeout}s" >/dev/null
     bb automation resume "$id" --project "$project" >/dev/null 2>&1 || true
   fi
 }
 ensure_scheduler() {
-  ensure_automation "$SCHEDULER_NAME" "* * * * *" "$SCHEDULER_SCRIPT" 90s
-  ensure_automation "$METRICS_NAME" "17 * * * *" "$METRICS_SCRIPT" 300s
+  ensure_automation "$SCHEDULER_NAME" "* * * * *" "$SCHEDULER_SCRIPT" 90
+  ensure_automation "$METRICS_NAME" "17 * * * *" "$METRICS_SCRIPT" 300
 }
 
 tailnet_host() { tailscale status --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))'; }
