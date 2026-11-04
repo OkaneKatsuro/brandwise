@@ -6,8 +6,9 @@
  * The vocabulary. Every metric is a count; rates are computed from counts (clicks / exposures), never stored.
  * `exposures` is the denominator of every rate: delivered e-mails, post views, ad impressions. `visits` are sessions on the
  * client's site that arrived from the entry's links; `leads` are the site's key events (sign-ups, forms) in those sessions.
+ * `reach` is the number of people who saw it (exposures / reach = frequency); `spend` is in the ad account's currency.
  */
-export const METRIC_NAMES = ["sends", "exposures", "clicks", "visits", "complaints", "unsubscribes", "bounces", "reactions", "comments", "shares", "saves", "video_views", "leads", "orders", "revenue", "spend"] as const;
+export const METRIC_NAMES = ["sends", "exposures", "reach", "clicks", "visits", "complaints", "unsubscribes", "bounces", "reactions", "comments", "shares", "saves", "video_views", "leads", "orders", "revenue", "spend"] as const;
 export type MetricName = (typeof METRIC_NAMES)[number];
 export const isMetricName = (s: string): s is MetricName => (METRIC_NAMES as readonly string[]).includes(s);
 
