@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { expectedRates } from "../email/adapters/sim-model.ts";
 import { DEFAULT_RAILS, canPropose, judge, type ArmData } from "./rails.ts";
-import { compareRates, minDetectableLift, normalCdf, wilson } from "./stats.ts";
+import { compareRates, minDetectableLift, normalCdf, requiredPerArm, wilson } from "./stats.ts";
 
 const R = DEFAULT_RAILS;
 const T0 = "2026-01-01T00:00:00.000Z";
@@ -19,9 +19,12 @@ test("stats: normal CDF, Wilson interval and the two-proportion test agree with 
 });
 
 test("power: what an audience can show, and that the test agrees with it", () => {
+  // textbook sample sizes, each arm with its own variance
+  assert.deepEqual([[0.02, 0.03], [0.02, 0.025], [0.005, 0.01], [0.005, 0.0075]].map(([a, b]) => Math.round(requiredPerArm(a, b) / 100) * 100), [3800, 13800, 4700, 15600]);
+  assert.equal(Math.round(100 * minDetectableLift(0.02, 1500)!), 85, "a 3,000 list split in two at a 2 % click rate shows +85 %, not +72 %");
   const mde = minDetectableLift(0.03, 600)!;
-  assert.ok(mde > 0.8 && mde < 1.0, `about +90 % at 600 per arm and a 3 % rate, got ${mde}`);
-  assert.ok(minDetectableLift(0.03, 6000)! < mde / 3, "ten times the audience, a third of the lift");
+  assert.ok(mde > 1.0 && mde < 1.2, `about +110 % at 600 per arm and a 3 % rate, got ${mde}`);
+  assert.ok(minDetectableLift(0.03, 6000)! < mde / 2.5, "ten times the audience, well under half the lift");
   assert.equal(minDetectableLift(0, 600), null);
   // a lift just above the minimum is significant with that audience, one well below it is not
   const n = 2000, base = 60, k = (lift: number) => Math.round(base * (1 + lift));
