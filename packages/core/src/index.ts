@@ -302,6 +302,23 @@ export function createCore(cfg: CoreConfig) {
       if (row.status === "failed") await event(id, "failed", "scheduler", "publishing", "failed", { note: error.slice(0, 500) });
       return row.status;
     },
+    /**
+     * A person published a `needs_manual` entry by hand (a post made in the app, an ad launched in Ads Manager) and says where it is,
+     * so its numbers can be found: `externalId` is the platform's id (the ad id for meta_ads). The entry's time has passed by then,
+     * so this is the one action allowed on it.
+     */
+    async publishedByHand(id: string, result: { externalId: string; url?: string | null }, actor: string): Promise<CalendarEntry> {
+      const externalId = result.externalId.trim();
+      if (!/^[A-Za-z0-9:_@./-]{1,200}$/.test(externalId)) throw new Error("Give the platform's id of what was published (letters, digits, : _ @ . / -)");
+      const url = result.url ? cleanLink(result.url) : null;
+      const row = (await q("update content_calendar set status = 'published', external_id = $2, external_url = $3, error = null where id = $1 and status = 'needs_manual' returning id", [id, externalId, url]))[0];
+      if (!row) {
+        const e = await calendar.get(id);
+        throw new Error(e ? `Entry ${id} is ${e.status}: only an entry waiting to be published by hand (needs_manual) can be marked published` : `No calendar entry with id ${id}`);
+      }
+      await event(id, "published", actor, "needs_manual", "published", { data: { externalId, by: "hand" } });
+      return (await calendar.get(id))!;
+    },
     /** No connector for the channel: the entry waits for a human to publish it by hand. */
     async markManual(id: string, reason: string): Promise<void> {
       await q("update content_calendar set status = 'needs_manual', error = $2 where id = $1", [id, reason]);

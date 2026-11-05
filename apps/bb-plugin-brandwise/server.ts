@@ -18,6 +18,8 @@ import { sleep, slug } from "./util.ts";
 import { connectorsFrom, runDue, SHORTENED_CHANNELS } from "./core/publish.ts";
 import { clientAddress, createLinks } from "./core/links/index.ts";
 import { ga4Source, parseServiceAccount } from "./core/site/ga4.ts";
+import { META_CHANNEL, metaAdsSource } from "./core/ads/meta.ts";
+import { campaignSlug, withUtm } from "./core/email/domain/render.ts";
 import { createEmail } from "./core/email/index.ts";
 import { createRegulator } from "./core/regulator/index.ts";
 import { regulatorStore } from "./core/regulator/store.ts";
@@ -142,6 +144,7 @@ export const rpcContract = defineRpcContract({
     output: entrySchema,
   },
   calendar_unapprove: { input: z.object({ id: z.string() }), output: entrySchema },
+  calendar_published: { input: z.object({ id: z.string(), externalId: z.string().trim().min(1).max(200), url: z.string().max(2000).nullable().optional() }), output: entrySchema },
   calendar_request_changes: { input: z.object({ id: z.string(), note: z.string().trim().min(1).max(2000), reason: z.enum(REVIEW_REASONS).nullable().optional() }), output: entrySchema },
   calendar_decide: { input: z.object({ id: z.string(), decision: z.enum(["approve", "cancel"]) }), output: entrySchema },
   creatives_list: { input: z.null(), output: z.object({ creatives: z.array(creativeSchema) }) },
@@ -245,6 +248,10 @@ export default async function plugin(bb: BbPluginApi) {
     section("site", "Web analytics", "Visits and leads on the client's own site per calendar entry, read from Google Analytics 4 by utm_content (docs/analytics.md).", {
       ga4ServiceAccount: { type: "string", label: "GA4 service account key", description: "The JSON key file of a Google service account with the Analytics Data API enabled. Each client adds its client_email to their GA4 property as a Viewer; the property is named per brand (campaign channel set site propertyId=<id> leadEvents=generate_lead). Empty = no site numbers.", default: "", secret: true },
     }),
+    section("ads", "Ads", "Reports of ads run on the platforms, read only: impressions, reach, link clicks and spend per calendar entry (docs/analytics.md). Nothing here can buy or change an ad.", {
+      metaAccessToken: { type: "string", label: "Meta access token", description: "A system-user token with the ads_read permission on the clients' ad accounts (Business Settings > System users). An ad is an entry on channel meta_ads, marked published with its ad id. Empty = no Meta numbers.", default: "", secret: true },
+      metaApiVersion: { type: "string", label: "Meta API version", description: "Graph API version, e.g. v23.0. Meta retires a version about two years after its release.", default: "v23.0" },
+    }),
     section("database", "Database", "Where campaigns, the calendar and asset records live.", {
       databaseUrl: { type: "string", label: "Postgres URL", default: "", secret: true },
     }),
@@ -316,7 +323,9 @@ export default async function plugin(bb: BbPluginApi) {
     credentials: () => (cfg.ga4ServiceAccount.trim() ? parseServiceAccount(cfg.ga4ServiceAccount) : null),
     targetOf: (campaignId) => need().channels.get(campaignId, "site"),
   });
-  const metrics = core === null ? null : createMetrics({ core, sources: [...(email ? [email.metricsSource()] : []), ...(links ? [links.metricsSource()] : []), ...(ga4 ? [ga4] : [])] });
+  // Meta ads, read only: lifetime insights per ad id, asked by `metrics pull`.
+  const meta = metaAdsSource({ token: () => cfg.metaAccessToken.trim() || null, version: () => cfg.metaApiVersion.trim() || "v23.0" });
+  const metrics = core === null ? null : createMetrics({ core, sources: [...(email ? [email.metricsSource()] : []), meta, ...(links ? [links.metricsSource()] : []), ...(ga4 ? [ga4] : [])] });
   // The editor-in-chief regulator (rails, signals, experiments, journal, tasks) and the development clock.
   const regulator = core !== null && metrics !== null ? createRegulator({ core, metrics, library: () => emailTemplates.library() }) : null;
   const editorCli = createEditorCli({ core: need, regulator: () => regulator });
@@ -581,6 +590,11 @@ export default async function plugin(bb: BbPluginApi) {
       await changed();
       return entry;
     },
+    calendar_published: async ({ id, externalId, url }) => {
+      const entry = await need().publishing.publishedByHand(id, { externalId, url: url || null }, "ui");
+      await changed();
+      return entry;
+    },
     calendar_unapprove: async ({ id }) => {
       const entry = await need().calendar.unapprove(id, "ui");
       await changed();
@@ -764,6 +778,8 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise calendar add <title> --channel <c> --at <ISO date> --tier <1|2|3> [--campaign <c>] [--asset <id>] [--body <text>] [--link <url>]",
     "  bb brandwise calendar edit <id> [--title <t>] [--body <text>] [--link <url>] [--channel <c>] [--at <ISO date>] [--asset <id>]",
     "  bb brandwise calendar request-changes <id> <note> [--reason claims|facts|tone|brand|visual|legal|typo|offer|other]",
+    "  bb brandwise calendar published <id> --external <platform id> [--url <url>]   (an entry waiting to be published by hand was published: where it is, e.g. the ad id of a meta_ads entry)",
+    "  bb brandwise calendar tagged-link <id>   (the entry's link with its UTM tags, to use when publishing by hand)",
     "  bb brandwise calendar history <id>   (every action on the entry: who, when, the send-back notes and reasons)",
     "  bb brandwise calendar unapprove <id>   (upcoming approved entry back to pending_approval; entries whose time has passed accept no action)",
     "  bb brandwise calendar approve|cancel <id>",
@@ -810,7 +826,7 @@ export default async function plugin(bb: BbPluginApi) {
   ].join("\n");
   const vals = (argv: string[], name: string) => argv.flatMap((a, i) => (a === name && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
   const val = (argv: string[], name: string) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
-  const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml", "--reason", "--source", "--days"]);
+  const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml", "--reason", "--source", "--days", "--external", "--url"]);
   const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, "--json", "--ai", "--stop", "--video", "--image", "--raw"]);
   /**
    * Who did it, as recorded in the entry's history: always "cli" or "cli:<label>" from the CLI. `--as` is a label agents give
@@ -1228,6 +1244,23 @@ export default async function plugin(bb: BbPluginApi) {
           const e = await c.calendar.decide(id, action, cliActor(args));
           await changed();
           return reply(e, fmtEntry(e));
+        }
+        if (area === "calendar" && action === "published") { // a person published a needs_manual entry by hand and says where
+          const id = positional(args.slice(2))[0], external = val(args, "--external");
+          if (!id || !external) return { exitCode: 1, stderr: usage };
+          const e = await c.publishing.publishedByHand(id, { externalId: external, url: val(args, "--url") ?? null }, cliActor(args));
+          await changed();
+          return reply(e, fmtEntry(e));
+        }
+        if (area === "calendar" && action === "tagged-link") { // the entry's link with its UTM tags, for publishing by hand (an ad, a post in an app)
+          const id = positional(args.slice(2))[0];
+          if (!id) return { exitCode: 1, stderr: usage };
+          const e = await c.calendar.get(id);
+          if (!e) return { exitCode: 1, stderr: `No calendar entry with id ${id}` };
+          if (!e.link) return { exitCode: 1, stderr: `Entry ${id} has no link (calendar edit ${id} --link <url>)` };
+          const paid = e.channel === META_CHANNEL;
+          const url = withUtm(e.link, { entryId: e.id, campaign: campaignSlug(e.campaignName), medium: paid ? "paid" : "social", source: paid ? "meta" : e.channel });
+          return reply({ url }, url);
         }
         if (area === "calendar" && action === "history") {
           const id = positional(args.slice(2))[0];

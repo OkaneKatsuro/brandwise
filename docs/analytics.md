@@ -16,7 +16,7 @@ Each step is one small pull request on top of the previous one.
 | 2 | `stack/analytics-2-metrics` | One port `MetricsSource` writing `metric_point` per calendar entry (`roadmap.md` §6). E-mail becomes one adapter; learnings and experiments read from it instead of `email_event`. |
 | 3 | `stack/analytics-3-links` | Own short links with a redirect: clicks per entry in any channel, with nothing to set up on the client's side. |
 | 4 | `stack/analytics-4-site` | GA4: visits and key events by `utm_content`, so leads arrive from the analytics the client already has, without webhooks or CSV. |
-| 5 | `stack/analytics-5-ads-<platform>` | Ad platform reports, read only: spend, impressions, clicks, conversions per ad. |
+| 5 | `stack/analytics-5-ads-meta` | Ad platform reports, read only: spend, impressions, clicks, conversions per ad. |
 | 6 | `stack/analytics-6-social-<platform>` | Organic post metrics. |
 | 7 | `stack/analytics-7-ads-buy`, `-acp` | Buying through the calendar and a person's approval, paid through a real ACP adapter. |
 
@@ -62,6 +62,17 @@ Not planned: LLM or token cost accounting (subscriptions make it meaningless).
 - An entry of a measured property that GA4 has no row for had no visit yet, so it gets 0. GA4 processes data with a delay of hours, so recent numbers grow after the fact; each pull stores a new snapshot.
 - The hourly automation "BrandWise metrics" (`provision.sh apply`) runs `metrics pull`. `metrics campaign` ends with the campaign's funnel: exposures, clicks, visits, leads, orders and revenue, each over the entries that report it.
 - Leads are not yet a metric the rails decide on: experiments still judge click rate. Leads per entry are small numbers, so a lead test needs the exact test for rare events and enough of them. That comes later.
+
+## Step 5: ad reports (Meta), read only
+
+- An ad is a calendar entry on channel `meta_ads`, approved like any other entry. With no connector that buys (that is step 7), the scheduler parks it as "publish by hand" when its time comes. A person then launches the ad in Ads Manager with the link from `bb brandwise calendar tagged-link <id>` (`utm_medium=paid`, `utm_source=meta`, `utm_content=<entry id>`), and marks the entry published with the ad's id: `bb brandwise calendar published <id> --external <ad id>`, or "Mark published" in the entry's dialog.
+- `calendar published` works for every channel without a connector, for example a post made in an app. It is the one action allowed on an entry whose time has passed, and only while it waits as `needs_manual`.
+- `ads/meta.ts` is a pull source for `meta_ads`. It makes one Graph API read per 50 ads (`?ids=...&fields=insights.date_preset(maximum){...}`) and reports lifetime `exposures` (impressions), `reach`, `clicks` (link clicks) and `spend` (in the ad account's currency).
+  - An ad without delivery has 0; an id Meta did not answer for is unknown.
+  - The token travels in a header and needs only `ads_read`. Nothing here can spend money or change an ad.
+- Ads have exposures and clicks, so the rails can judge an A/B test between two ads: both on `meta_ads`, in two child campaigns. Site visits and leads of an ad come from GA4 by the same `utm_content`. Meta's own conversion counts are not used.
+- Settings > Ads: Meta access token (a system-user token with `ads_read`) and the Graph API version (default `v23.0`, which Meta retires after about two years).
+- `metrics campaign`'s funnel adds reach and spend.
 
 Notes on step 1:
 - The actor is a label, not a verified identity: `ui` is a person on a page, `cli` or `cli:<label>` the command line (`--as <label>`), `auto` the tier-1 approval, `scheduler` publishing. The CLI refuses `--as ui`, `auto`, `scheduler` and `unknown`.
