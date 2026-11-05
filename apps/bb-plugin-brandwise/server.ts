@@ -20,6 +20,8 @@ import { createEmail } from "./core/email/index.ts";
 import { createRegulator } from "./core/regulator/index.ts";
 import { regulatorStore } from "./core/regulator/store.ts";
 import { createEditorCli } from "./editor.ts";
+import { createMetricsCli } from "./metrics-cli.ts";
+import { createMetrics } from "./core/metrics/index.ts";
 import { randomUUID } from "node:crypto";
 import { MODES, allowedModes, applyMode, appliedMode, defHashOf, isModeName, type ModeName } from "./modes.ts";
 
@@ -295,9 +297,12 @@ export default async function plugin(bb: BbPluginApi) {
     pool: core.pool, salt: emailSalt, providers: { resendApiKey: cfg.resendApiKey || undefined, resendWebhookSecret: cfg.resendWebhookSecret || undefined },
     sim: cfg.simEnabled ? { now: async () => new Date(Date.now() + (await regulatorStore(core!.pool).clockOffset()) * 1000) } : undefined,
   });
+  // Numbers of calendar entries from every source (core/metrics): e-mail today, more channels with each source (docs/analytics.md).
+  const metrics = core === null ? null : createMetrics({ core, sources: email ? [email.metricsSource()] : [] });
   // The editor-in-chief regulator (rails, signals, experiments, journal, tasks) and the development clock.
-  const regulator = core !== null && email !== null ? createRegulator({ core, email, library: () => emailTemplates.library() }) : null;
+  const regulator = core !== null && metrics !== null ? createRegulator({ core, metrics, library: () => emailTemplates.library() }) : null;
   const editorCli = createEditorCli({ core: need, regulator: () => regulator });
+  const metricsCli = createMetricsCli({ core: need, metrics: () => metrics, now: async () => (regulator ? regulator.clock.now() : new Date()) });
   /** Every publishing connector that is switched on. A channel without one waits as "Publish by hand". */
   const allConnectors = () => [...connectorsFrom(cfg), ...(email && email.providers.length > 0 ? [email.connector()] : [])];
   for (const p of email?.providers ?? []) {
@@ -734,8 +739,10 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise calendar unapprove <id>   (upcoming approved entry back to pending_approval; entries whose time has passed accept no action)",
     "  bb brandwise calendar approve|cancel <id>",
     "  (calendar add, edit, request-changes, unapprove, approve and cancel take [--as <label>]: the history records cli:<label>)",
+    "  bb brandwise metrics sources | entry <id> | campaign [--campaign <c>] [--as-of <ISO>]   (numbers of published entries from every source, any channel; unknown is shown as missing, never 0)",
+    "  bb brandwise metrics pull [--source <id>] [--days 30]   (ask pull sources for current totals of entries published in the last days and store them; safe to repeat)",
     "  bb brandwise editor signals [--campaign <c>] [--as-of <ISO>]   (what the editor sees: goals, smoothed rates, experiments, what is allowed now)",
-    "  bb brandwise editor experiments list|propose --a <entry> --b <entry> --hypothesis \"...\"|evaluate <id>   (A/B on e-mail; the rails judge, nobody can overrule)",
+    "  bb brandwise editor experiments list|propose --a <entry> --b <entry> --hypothesis \"...\"|evaluate <id>   (A/B on any channel a metrics source measures with exposures and clicks; the rails judge, nobody can overrule)",
     "  bb brandwise editor journal read [--limit n] | write \"<text>\" [--kind note]",
     "  bb brandwise editor tasks list [--status s] | create --kind <k> --brief \"...\" [--params '<json>'] | claim <id> | submit <id> --subject \"...\" [--content '<json slots to change>'] | complete <id> [--result '<json>']",
     "  bb brandwise editor goals [set <metric> <value> --kind target|limit] | unfreeze   (goals and unfreeze are a person's commands)",
@@ -773,7 +780,7 @@ export default async function plugin(bb: BbPluginApi) {
   ].join("\n");
   const vals = (argv: string[], name: string) => argv.flatMap((a, i) => (a === name && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
   const val = (argv: string[], name: string) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
-  const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml", "--reason"]);
+  const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml", "--reason", "--source", "--days"]);
   const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, "--json", "--ai", "--stop", "--video", "--image", "--raw"]);
   /**
    * Who did it, as recorded in the entry's history: always "cli" or "cli:<label>" from the CLI. `--as` is a label agents give
@@ -1369,6 +1376,7 @@ export default async function plugin(bb: BbPluginApi) {
         if (area === "product") return productCli(c, action, args, { val, positional, reply, usage });
         if (area === "video") return video.cli(action, args, { val, positional, reply, usage });
         if (area === "editor") return editorCli.editor(action, args, { val, positional, reply, usage });
+        if (area === "metrics") return metricsCli(action, args, { val, positional, reply, usage });
         if (area === "sim") return editorCli.sim(action, args, { val, positional, reply, usage });
         if (area === "assets" && action === "rename") {
           const [id, ...nameParts] = positional(args.slice(2));
