@@ -40,6 +40,18 @@ Not planned: LLM or token cost accounting (subscriptions make it meaningless).
 - CLI: `bb brandwise metrics sources | entry <id> | campaign [--campaign <c>] [--as-of <ISO>]`, `metrics pull [--source <id>] [--days 30]`. No pull source exists yet; the automation that pulls comes with the first one (step 3).
 - Not changed: `write_variant` tasks still create e-mail entries; arms on other channels are proposed with entries made by hand or by an author.
 
+## Step 3: own short links
+
+- On publishing, the Telegram connector replaces every link of the post (already tagged with UTM) with our short link `<public address>?c=<id>.<signature>`. The redirect route `/api/v1/plugins/brandwise/http/l` sends the visitor on with a 302 and records the request. More channels join as their connectors take the shortener (`SHORTENED_CHANNELS` in `publish.ts`).
+- The route has no bb login, because a link is public by nature. A code carries an HMAC signature, so only links we issued resolve; anything else is a 404. The target is always a URL stored when publishing, so it is not an open redirect.
+- A click stores no address and no browser string, only salted hashes, so unique clicks can be counted. Link previews, crawlers, scripts and HEAD requests are recorded as bots and never counted. Telegram fetches every link of a post for its preview.
+- Click integrity: the client address is the right-most `X-Forwarded-For` entry, the one our proxy appends; whatever the client wrote before it is ignored, so the proxy in front of the instance must append that header. One address adds at most 3 unique visitors to an entry, so rotating the browser string cannot inflate a test.
+- `links` is a live metrics source: unique human visitors over all short links of an entry, as of any moment. An entry with links and no click has 0; one without short links is unknown.
+- E-mail keeps its links: the provider counts its clicks, and redirects through an unknown domain hurt delivery.
+- Needed before it works: a public address that reaches the route (a tunnel or proxy), set as Settings > Short links (`LINKS_BASE_URL` for provisioning). Without it, links are tagged but not shortened. Replacing the plugin's encryption key breaks issued links.
+- CLI: `bb brandwise metrics links <entry>` lists each link with clicks, unique visitors and bot requests.
+- Telegram still reports no views through the Bot API, so a Telegram post has clicks but no exposures, and an A/B test there cannot conclude yet. That needs an exposure source (step 6).
+
 Notes on step 1:
 - The actor is a label, not a verified identity: `ui` is a person on a page, `cli` or `cli:<label>` the command line (`--as <label>`), `auto` the tier-1 approval, `scheduler` publishing. The CLI refuses `--as ui`, `auto`, `scheduler` and `unknown`.
 - Send-back reasons are a closed list: claims, facts, tone, brand, visual, legal, typo, offer, other. The approval dialog offers them; the CLI takes `--reason`.

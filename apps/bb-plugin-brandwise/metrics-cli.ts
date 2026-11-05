@@ -1,6 +1,7 @@
 // CLI of the metrics service: `bb brandwise metrics ...`. Read-only except `pull`, which only asks sources for numbers and stores them.
 // The service itself lives in packages/core/src/metrics; this file parses arguments and prints.
 import type { Core } from "./core/index.ts";
+import type { Links } from "./core/links/index.ts";
 import { METRIC_NAMES, type EntryMetrics, type Metrics } from "./core/metrics/index.ts";
 
 type Io = { val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string };
@@ -17,7 +18,7 @@ const fmt = (m: EntryMetrics, title?: string) => {
     `${m.values.exposures !== undefined ? `  (click rate ${pct(ratio(m, "clicks"))})` : ""}${title ? `  "${title}"` : ""}`;
 };
 
-export function createMetricsCli(deps: { core: () => Core; metrics: () => Metrics | null; now: () => Promise<Date> }) {
+export function createMetricsCli(deps: { core: () => Core; metrics: () => Metrics | null; links: () => Links | null; now: () => Promise<Date> }) {
   return async function metricsCli(action: string | undefined, args: string[], io: Io) {
     const { val, positional, reply, usage } = io;
     const m = deps.metrics();
@@ -40,6 +41,15 @@ export function createMetricsCli(deps: { core: () => Core; metrics: () => Metric
       const entries = await m.published(c.id);
       const numbers = await m.forEntries(entries, asOf);
       return reply(numbers, numbers.map((x, i) => fmt(x, entries[i].title)).join("\n") || `Nothing published in ${c.name} yet.`);
+    }
+    if (action === "links") {
+      const id = positional(args.slice(2))[0];
+      if (!id) return { exitCode: 1, stderr: usage };
+      const l = deps.links();
+      if (!l) return { exitCode: 1, stderr: "Short links need the database" };
+      const rows = await l.stats(id);
+      const off = l.enabled() ? "" : "\nShort links are off: set the public address under Settings > Short links.";
+      return reply(rows, (rows.map((r) => `${String(r.visitors).padStart(5)} visitors  ${String(r.clicks).padStart(5)} clicks  ${String(r.bots).padStart(4)} bots  ${r.url}`).join("\n") || "No short links for this entry.") + off);
     }
     if (action === "pull") {
       const days = val(args, "--days");
