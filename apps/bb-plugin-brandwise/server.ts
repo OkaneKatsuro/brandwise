@@ -29,7 +29,7 @@ import { createEditorCli } from "./editor.ts";
 import { createMetricsCli } from "./metrics-cli.ts";
 import { createMetrics } from "./core/metrics/index.ts";
 import { styleCli } from "./style-cli.ts";
-import { styledSpec, type StyleRef } from "./core/styles/index.ts";
+import type { StyleRef } from "./core/styles/index.ts";
 import { randomUUID } from "node:crypto";
 import { MODES, allowedModes, applyMode, appliedMode, defHashOf, isModeName, type ModeName } from "./modes.ts";
 
@@ -1142,7 +1142,7 @@ export default async function plugin(bb: BbPluginApi) {
     if (duration !== undefined) params.duration = duration;
     const styleId = val(args, "--style");
     if (styleId === undefined && args.includes("--slot")) throw new Error("--slot fills a slot of a style: name the style with --style <id> (bb brandwise style list)");
-    const styled = styleId === undefined ? undefined : styledSpec({
+    const styled = styleId === undefined ? undefined : await c.styles.spec({
       style: styleId, slots: pairs(args, "--slot"), provider: (await c.generation.providerFor(scope, host())).provider.id,
       prompt: val(args, "--prompt"), model, aspect: val(args, "--aspect"), params,
     });
@@ -1207,7 +1207,6 @@ export default async function plugin(bb: BbPluginApi) {
             ...(v.error ? [`error: ${v.error}`] : []),
           ].join("\n"));
         }
-        if (area === "style") return styleCli(action, args, { val, positional, reply, usage });
         const c = need();
         const campaign = async () => (await c.campaigns.resolve(val(args, "--campaign"))).id;
         if (area === "campaign" && action === "list") {
@@ -1521,6 +1520,7 @@ export default async function plugin(bb: BbPluginApi) {
             ? `Done: asset ${r.asset!.id} (${r.asset!.name}, ${r.asset!.width ?? "?"}x${r.asset!.height ?? "?"}), ~${r.credits} credits. Show it with ::creative{ids="${r.asset!.id}"}`
             : `Still running (status ${r.status}), job ${jobId}. Finish with: bb brandwise creative collect ${jobId}`);
         }
+        if (area === "style") return styleCli(c, action, args, { val, positional, reply, usage });
         if (area === "product") return productCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
         if (area === "video") return video.cli(action, args, { val, positional, reply, usage });
         if (area === "editor") return editorCli.editor(action, args, { val, positional, reply, usage });

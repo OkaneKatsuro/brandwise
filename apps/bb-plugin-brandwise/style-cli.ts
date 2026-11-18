@@ -1,11 +1,12 @@
 // CLI of the style library: `bb brandwise style list|show`. Read-only. The styles and their rules live in packages/core/src/styles;
 // this file parses arguments and prints.
-import { listStyles, styleById, type Style } from "./core/styles/index.ts";
+import type { Core } from "./core/index.ts";
+import type { Style } from "./core/styles/index.ts";
 
 type Io = { val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string };
 
 /** One style among others: enough to choose by goal and channel. */
-const summary = (s: Style) => `${s.id.padEnd(20)} ${s.kind.padEnd(6)} ${s.aspects.join(", ").padEnd(21)} ${s.channels.join(", ")}\n    ${s.title}. ${s.use}`;
+const summary = (s: Style, width: number) => `${s.id.padEnd(width)} ${s.kind.padEnd(6)} ${s.aspects.join(", ").padEnd(21)} ${s.channels.join(", ")}\n    ${s.title}. ${s.use}`;
 
 /** Everything needed to use a style: when it fits, what to fill in, the post text that goes with it and what to avoid. */
 const describe = (s: Style) => {
@@ -27,15 +28,16 @@ const describe = (s: Style) => {
 };
 
 /** `bb brandwise style list [--kind image|video] [--channel <c>] | show <id>` */
-export function styleCli(action: string | undefined, args: string[], { val, positional, reply, usage }: Io) {
+export async function styleCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage }: Io) {
   if (action === "list") {
-    const styles = listStyles({ kind: val(args, "--kind"), channel: val(args, "--channel") });
-    return reply(styles, styles.map(summary).join("\n") || "No style matches. bb brandwise style list shows them all.");
+    const styles = await c.styles.list({ kind: val(args, "--kind"), channel: val(args, "--channel") });
+    const width = Math.max(20, ...styles.map((s) => s.id.length));
+    return reply(styles, styles.map((s) => summary(s, width)).join("\n") || "No style matches. bb brandwise style list shows them all.");
   }
   if (action === "show") {
     const id = positional(args.slice(2))[0];
     if (!id) return { exitCode: 1, stderr: usage };
-    const style = styleById(id);
+    const style = await c.styles.byId(id);
     return reply(style, describe(style));
   }
   return { exitCode: 1, stderr: usage };

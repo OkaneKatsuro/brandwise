@@ -7,6 +7,8 @@ import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectComm
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import pg from "pg";
 import { createContext } from "./context/index.ts";
+import { createStyles } from "./styles/index.ts";
+import { fetchRepository } from "./styles/source.ts";
 import { createSettings, type Scope, type SettingValue } from "./settings.ts";
 import { SETTING_FIELDS, providerById, type ProviderConfig } from "./providers/index.ts";
 
@@ -452,6 +454,9 @@ export function createCore(cfg: CoreConfig) {
   // The company's context: the pack of an always-on base as versioned Markdown files (docs/context-styles-map.md, step 1).
   const context = createContext({ pool });
 
-  return { campaigns, calendar, publishing, channels, assets, settings, generation, context, pool, close: async () => { await pool.end(); s3.destroy(); } };
+  // The styles a creative can be generated in: the built-in ones and those of the style packs a person switched on (step 6).
+  const styles = createStyles({ pool, fetch: fetchRepository });
+
+  return { campaigns, calendar, publishing, channels, assets, settings, generation, context, styles, pool, close: async () => { await pool.end(); s3.destroy(); } };
 }
 export type Core = ReturnType<typeof createCore>;

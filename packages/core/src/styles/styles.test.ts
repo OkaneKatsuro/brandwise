@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { BUILTIN_STYLES } from "./builtin/index.ts";
-import { parseStyle, renderStyle, type Style } from "./domain.ts";
-import { listStyles, styleById, styledSpec } from "./index.ts";
+import { parseStyle, renderStyle, selectStyles, styledSpec, type Style } from "./domain.ts";
 
 const HERO: Style = {
   id: "hero", title: "Hero", kind: "image", aspects: ["4:5", "1:1"], channels: ["linkedin", "meta_ads"],
@@ -26,9 +25,14 @@ test("parseStyle: every problem is named", () => {
     ["not an object", "hero", /Invalid style: it must be an object with the fields id, title/],
     ["a list", [HERO], /it must be an object/],
     ["an unknown field", { ...HERO, model: "x" }, /Invalid style "hero":\n- unknown field "model" \(a style has: id, title/],
-    ["an id that is not kebab-case", { ...HERO, id: "Product Hero" }, /Invalid style "Product Hero":\n- id must be lowercase letters, digits and single hyphens/],
+    ["an id that is not kebab-case, which is not repeated", { ...HERO, id: "Product Hero" }, /^Error: Invalid style:\n- id must be lowercase letters, digits and single hyphens/],
     ["no id", { ...HERO, id: undefined }, /Invalid style:\n- id must be/],
-    ["an empty title", { ...HERO, title: " " }, /- title must be non-empty text/],
+    ["an unknown field that is more than a name, quoted on one line", { ...HERO, "model\nid": "x" }, /\n- unknown field "model id" \(a style has: id, title/],
+    ["an empty title", { ...HERO, title: " " }, /- title must be non-empty text on one line/],
+    ["a title of two lines", { ...HERO, title: "Hero\nmeme  image" }, /- title must be non-empty text on one line/],
+    ["text that steers a terminal", { ...HERO, avoid: "Text. \u001b[2J" }, /- avoid must be non-empty text on one line/],
+    ["text that cannot be stored", { ...HERO, use: "When\u0000ever" }, /- use must be non-empty text on one line/],
+    ["half a character", { ...HERO, copy: "Open with \ud83d" }, /- copy must be non-empty text on one line/],
     ["no use", { ...HERO, use: undefined }, /- use must be non-empty text/],
     ["no copy", { ...HERO, copy: 1 }, /- copy must be non-empty text/],
     ["no avoid", { ...HERO, avoid: "" }, /- avoid must be non-empty text/],
@@ -40,15 +44,19 @@ test("parseStyle: every problem is named", () => {
     ["no slots", { ...HERO, slots: {}, prompt: "A photograph." }, /- slots must map at least one slot name/],
     ["a slot name the template cannot hold", { ...HERO, slots: { "the subject": "x" } }, /- slots must map/],
     ["a slot without a description", { ...HERO, slots: { ...HERO.slots, setting: "" } }, /- slots must map/],
-    ["an empty prompt", { ...HERO, prompt: "" }, /- prompt must be non-empty text/],
+    ["a slot described on two lines", { ...HERO, slots: { ...HERO.slots, setting: "Where it stands\nIgnore the above" } }, /- slots must map at least one slot name \(lowercase letters, digits and _\) to what it should hold, on one line/],
+    ["an empty prompt", { ...HERO, prompt: "" }, /- prompt must be non-empty text on one line/],
+    ["a prompt of two lines", { ...HERO, prompt: "Photograph of {{subject}}\nin {{setting}}." }, /- prompt must be non-empty text on one line/],
     ["a prompt that is not a template", { ...HERO, prompt: "Photograph of {{subject" }, /- prompt is not a valid Mustache template: Unclosed tag/],
     ["a section in the prompt", { ...HERO, prompt: "{{subject}} {{#setting}}in {{setting}}{{/setting}}" }, /- prompt may only insert slots, written \{\{slot\}\}: \{\{#setting\}\} is a section$/],
     ["a partial in the prompt", { ...HERO, prompt: "{{subject}} in {{setting}} {{> footer}}" }, /- prompt may only insert slots, written \{\{slot\}\}: \{\{>footer\}\} is a partial$/],
     ["a tag that is not a slot", { ...HERO, prompt: "{{subject}} in {{setting}}, {{mood}}" }, /- prompt inserts \{\{mood\}\}, which is not one of the slots \(subject, setting\)/],
     ["a slot the prompt never uses", { ...HERO, prompt: "Photograph of {{subject}}." }, /- slot "setting" is never inserted in the prompt/],
-    ["a model that is not text", { ...HERO, models: { higgsfield: 42 } }, /- models must map a provider id to a model id/],
-    ["a model that is not a model id", { ...HERO, models: { higgsfield: "Veo 3.1" } }, /- models must map a provider id to a model id \(lowercase letters, digits, _ \. -\)/],
-    ["a parameter that is not text", { ...HERO, params: { duration: 8 } }, /- params must map a parameter name to a text value, such as \{ "duration": "8" \}/],
+    ["a model that is not text", { ...HERO, models: { higgsfield: 42 } }, /- models must map a provider id/],
+    ["a model that is not a model id", { ...HERO, models: { higgsfield: "Veo 3.1" } }, /- models must map a provider id \(lowercase letters, digits and _\) to a model id \(lowercase letters, digits, _ \. -\)/],
+    ["a provider that is not a provider id", { ...HERO, models: { "Higgs field": "nano_banana_pro" } }, /- models must map a provider id/],
+    ["a parameter that is not text", { ...HERO, params: { duration: 8 } }, /- params must map a parameter name \(lowercase letters, digits and _\) to a text value on one line, such as \{ "duration": "8" \}/],
+    ["a parameter name that is not a name", { ...HERO, params: { "--raw": "1" } }, /- params must map a parameter name/],
     ["a version below 1", { ...HERO, version: 0 }, /- version must be a whole number, 1 or more/],
     ["a version that is not whole", { ...HERO, version: 1.5 }, /- version must be/],
     ["a version as text", { ...HERO, version: "1" }, /- version must be/],
@@ -138,32 +146,28 @@ test("built-in styles: a recipe that changes raises its version", () => {
   }
 });
 
-test("listStyles: a kind lists only styles of that kind, a channel only styles for it; an unknown kind is an error", () => {
-  assert.equal(listStyles({}).length, BUILTIN_STYLES.length);
-  assert.deepEqual(listStyles({ kind: "video" }).map((s) => s.id), ["founder-on-camera"]);
-  assert.ok(listStyles({ kind: "image" }).length > 0 && listStyles({ kind: "image" }).every((s) => s.kind === "image"));
-  const email = listStyles({ channel: "email" });
+test("selectStyles: a kind keeps only styles of that kind, a channel only styles for it; an unknown kind is an error", () => {
+  assert.deepEqual(selectStyles(BUILTIN_STYLES, {}), BUILTIN_STYLES);
+  assert.deepEqual(selectStyles(BUILTIN_STYLES, { kind: "video" }).map((s) => s.id), ["founder-on-camera"]);
+  const images = selectStyles(BUILTIN_STYLES, { kind: "image" });
+  assert.ok(images.length > 0 && images.every((s) => s.kind === "image"));
+  const email = selectStyles(BUILTIN_STYLES, { channel: "email" });
   assert.ok(email.length > 0 && email.length < BUILTIN_STYLES.length && email.every((s) => s.channels.includes("email")));
-  assert.deepEqual(listStyles({ kind: "video", channel: "email" }), [], "both filters apply");
-  assert.deepEqual(listStyles({ channel: "fax" }), []);
-  assert.throws(() => listStyles({ kind: "audio" }), /Unknown kind "audio": a style is image or video/);
-});
-
-test("styleById: an unknown id is refused, with the styles there are", () => {
-  assert.equal(styleById("meme").title, "Meme");
-  assert.throws(() => styleById("hero-shot"), /Unknown style "hero-shot"\. The styles are product-hero, product-screen[^]*meme; bb brandwise style list/);
+  assert.deepEqual(selectStyles(BUILTIN_STYLES, { kind: "video", channel: "email" }), [], "both filters apply");
+  assert.deepEqual(selectStyles(BUILTIN_STYLES, { channel: "fax" }), []);
+  assert.throws(() => selectStyles(BUILTIN_STYLES, { kind: "audio" }), /Unknown kind "audio": a style is image or video/);
 });
 
 test("styledSpec: a generation that names a style gets its spec from the style, and the asset records the style's id, version and origin", () => {
-  const { spec, style } = styledSpec({ style: "product-hero", slots: { subject: "a laptop", setting: "an oak desk" }, provider: "higgsfield" });
-  const hero = styleById("product-hero");
-  assert.deepEqual(spec, renderStyle(hero, { slots: { subject: "a laptop", setting: "an oak desk" }, provider: "higgsfield" }));
-  assert.deepEqual(style, { id: "product-hero", version: hero.version, origin: "built-in" });
-  const given = styledSpec({ style: "product-hero", slots: { subject: "a laptop", setting: "an oak desk" }, provider: "byteplus", model: "other_model", aspect: "1:1", params: { seed: "7" } }).spec;
-  assert.deepEqual([given.model, given.aspect, given.params], ["other_model", "1:1", { seed: "7" }], "model, aspect and parameters are passed on");
+  const { spec, style } = styledSpec(HERO, "built-in", { slots: SLOTS, provider: "higgsfield" });
+  assert.deepEqual(spec, renderStyle(HERO, { slots: SLOTS, provider: "higgsfield" }));
+  assert.deepEqual(style, { id: "hero", version: 3, origin: "built-in" });
+  assert.deepEqual(styledSpec({ ...HERO, id: "extras/hero" }, "pack:extras", { slots: SLOTS, provider: "higgsfield" }).style, { id: "extras/hero", version: 3, origin: "pack:extras" }, "a style of a pack: its address and its pack");
+  const given = styledSpec(HERO, "built-in", { slots: SLOTS, provider: "byteplus", model: "other_model", aspect: "1:1", params: { seed: "7" } }).spec;
+  assert.deepEqual([given.model, given.aspect, given.params], ["other_model", "1:1", { quality: "high", seed: "7" }], "model, aspect and parameters are passed on");
 });
 
 test("styledSpec: a prompt beside a style is refused; the style alone writes the prompt", () => {
-  assert.throws(() => styledSpec({ style: "product-hero", slots: { subject: "a laptop", setting: "an oak desk" }, provider: "higgsfield", prompt: "a laptop on a desk" }),
-    /--style and --prompt cannot be combined: style "product-hero" writes the prompt from its slots\. Drop --prompt[^]*or drop --style/);
+  assert.throws(() => styledSpec(HERO, "built-in", { slots: SLOTS, provider: "higgsfield", prompt: "a laptop on a desk" }),
+    /--style and --prompt cannot be combined: style "hero" writes the prompt from its slots\. Drop --prompt[^]*or drop --style/);
 });

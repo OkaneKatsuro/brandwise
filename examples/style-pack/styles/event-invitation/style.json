@@ -1,0 +1,18 @@
+{
+  "id": "event-invitation",
+  "title": "Event invitation",
+  "kind": "image",
+  "aspects": ["4:5", "1:1", "9:16"],
+  "channels": ["linkedin", "instagram", "facebook", "threads", "telegram", "email"],
+  "slots": {
+    "event": "The name of the event as the headline: six words at most, no quotation marks. Example: Shipping Faster with Loopwork",
+    "details": "Date, time and place on one line, as they should be printed: ten words at most. Example: 12 March 2027, 18:00 CET, online",
+    "scene": "What the picture shows, as a noun phrase: the place or the mood of the event, without faces. Example: an empty conference stage with warm spotlights and rows of chairs"
+  },
+  "prompt": "Event invitation card. The upper two thirds of the frame: {{scene}}, photographed in warm, inviting evening light with a shallow depth of field, darkening gently towards the bottom. The lower third: a solid, very dark panel, separated from the picture by one thin horizontal rule in a warm accent colour. On the panel, left aligned with wide margins: the event's name \"{{event}}\" in large bold sans-serif, on at most two lines; under it, in a smaller regular weight and a lighter tone, the single line \"{{details}}\". Every word and every digit is spelled exactly as given. Nothing else is written anywhere. No recognisable faces, no logos, no QR code, no button, no watermark.",
+  "models": { "higgsfield": "nano_banana_pro" },
+  "version": 1,
+  "use": "An event with a date: a webinar, a meetup, a launch stream, a talk or a stand at a conference. For the announcement and the reminders before it. Date and place are on the image, so it still works when it is passed on without the post.",
+  "copy": "First line: who it is for and what they take away, not the event's name. Then date, time with the time zone and place once more as text, what happens in three short lines, who speaks, and one link to sign up. Say whether it is free and whether a recording follows.",
+  "avoid": "Details that are not final: a date on an image that was already shared cannot be taken back. More than one line of details, or a long event name: read every word and every digit on the result. Generated portraits of the speakers: use their real, approved photos in the post instead. The recap after the event: that is another post in another style."
+}
