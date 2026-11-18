@@ -20,12 +20,13 @@ type TestDatabase = {
 };
 
 /**
- * The address with `schema` first on the search path of every connection made from it, so no query names a schema. `public`
- * follows: extensions put their types there. Options the address already carries are kept.
+ * The address with `schema` as the search path of every connection made from it, so no query names a schema. `public` is not on
+ * the path: the running instance keeps its tables there, and a statement that names a table the test schema does not have must
+ * fail, not reach the instance's. Options the address already carries are kept.
  */
 export function onSchema(databaseUrl: string, schema: string): string {
   const url = new URL(databaseUrl);
-  url.searchParams.set("options", [url.searchParams.get("options"), `-c search_path=${schema},public`].filter(Boolean).join(" "));
+  url.searchParams.set("options", [url.searchParams.get("options"), `-c search_path=${schema}`].filter(Boolean).join(" "));
   return url.toString();
 }
 

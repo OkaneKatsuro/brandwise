@@ -6,12 +6,12 @@ import { test } from "node:test";
 import { regulatorStore } from "./regulator/store.ts";
 import { dbTest, dropStaleSchemas, onSchema } from "./testing.ts";
 
-test("the address puts the schema first on the search path and public after it, and keeps the options it already has", () => {
+test("the address makes the schema the whole search path, without public, and keeps the options it already has", () => {
   const plain = new URL(onSchema("postgres://user:secret@localhost:5436/marketing?sslmode=disable", "test_1800000000_ab12cd34"));
-  assert.equal(plain.searchParams.get("options"), "-c search_path=test_1800000000_ab12cd34,public");
+  assert.equal(plain.searchParams.get("options"), "-c search_path=test_1800000000_ab12cd34");
   assert.deepEqual([plain.host, plain.pathname, plain.username, plain.password, plain.searchParams.get("sslmode")], ["localhost:5436", "/marketing", "user", "secret", "disable"], "the rest of the address is as it was");
   const withOptions = new URL(onSchema("postgres://localhost/marketing?options=-c%20statement_timeout%3D5s", "test_1800000000_ab12cd34"));
-  assert.equal(withOptions.searchParams.get("options"), "-c statement_timeout=5s -c search_path=test_1800000000_ab12cd34,public");
+  assert.equal(withOptions.searchParams.get("options"), "-c statement_timeout=5s -c search_path=test_1800000000_ab12cd34");
 });
 
 // The file's first database test: nothing has been written yet.
@@ -21,7 +21,8 @@ dbTest("a file's tests are on a schema of their own, on every connection: named 
   const [{ schema, path }] = answers[0].rows;
   assert.match(schema, /^test_\d{10}_[0-9a-f]{8}$/);
   assert.ok(Math.abs(Number(schema.split("_")[1]) - Date.now() / 1000) < 300, "the seconds are when it was made");
-  assert.deepEqual(path, [schema, "public"], "public follows, for the types of extensions");
+  assert.deepEqual(path, [schema], "public is not on the path: a table the schema does not have is not found in the instance's");
+  await assert.rejects(core.pool.query("select 1 from no_such_table_of_a_test"), /does not exist/);
   assert.ok(answers.every((answer) => answer.rows[0].schema === schema));
 
   const named = await core.pool.query("select relnamespace::regnamespace::text as schema from pg_class where oid in ('campaign'::regclass, 'sim_clock'::regclass, 'schema_migrations'::regclass)");
