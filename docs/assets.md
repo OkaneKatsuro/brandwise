@@ -44,7 +44,7 @@ create table asset (
   status        text not null default 'draft',  -- draft | linted | approved | published | archived
   ai_generated  boolean not null default false, -- labeling under AI Act art. 50
   rights        jsonb,           -- who holds the rights and what we may use the file for (customer photos!)
-  provenance    jsonb,           -- generated: model, prompt, job ID, cost, template + version, tokens, fields, lint
+  provenance    jsonb,           -- generated: model, prompt, job ID, cost, style (id, version, origin), template + version, tokens, fields, lint
                                  -- uploaded: who, when, from where
   created_by    text not null,   -- user or agent run
   created_at    timestamptz not null default now(),

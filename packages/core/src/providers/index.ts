@@ -4,6 +4,8 @@
 import type { SettingField, SettingValue } from "../settings.ts";
 import { higgsfield } from "./higgsfield.ts";
 
+export { MODEL_ID } from "./model-id.ts";
+
 export type GenSpec = {
   model: string;
   prompt: string;

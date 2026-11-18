@@ -10,7 +10,7 @@ import { createContext } from "./context/index.ts";
 import { createSettings, type Scope, type SettingValue } from "./settings.ts";
 import { SETTING_FIELDS, providerById, type ProviderConfig } from "./providers/index.ts";
 
-export { PROVIDERS, SETTING_FIELDS, providerById } from "./providers/index.ts";
+export { MODEL_ID, PROVIDERS, SETTING_FIELDS, providerById } from "./providers/index.ts";
 export type { Auth, GenSpec, Job, Provider, ProviderConfig } from "./providers/index.ts";
 export { downloadResult, higgsfield, isFailed } from "./providers/higgsfield.ts";
 export { cookieJarFor, sessionFromCookieJar } from "./download.ts";

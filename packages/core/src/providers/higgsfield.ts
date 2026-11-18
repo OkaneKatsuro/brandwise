@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Auth, GenSpec, Job, Provider, ProviderConfig } from "./index.ts";
+import { MODEL_ID } from "./model-id.ts";
 
 const FAILED = new Set(["failed", "error", "canceled", "cancelled", "nsfw", "rejected", "expired"]);
 export const isFailed = (status: string) => FAILED.has(status.toLowerCase());
@@ -116,7 +117,7 @@ export const higgsfield: Provider = {
   async models(cfg, query) {
     const { bin, env } = setup(cfg);
     if (query?.model !== undefined) {
-      if (!/^[a-z0-9_.-]{2,64}$/.test(query.model)) throw new Error(`Invalid model "${query.model}"`);
+      if (!MODEL_ID.test(query.model)) throw new Error(`Invalid model "${query.model}"`);
       return repeated(cfg, () => run(bin, ["model", "get", query.model!], env, 30_000));
     }
     return repeated(cfg, () => run(bin, ["model", "list", ...(query?.kind ? [`--${query.kind}`] : [])], env, 30_000));

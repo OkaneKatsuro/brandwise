@@ -91,12 +91,14 @@ Add `--json` when the output drives code.
 
 Generate directly, never by starting a thread, and never by running a provider's own CLI (it needs the network and the account of the campaign, which only the plugin has). Credits are spent, so every call checks the price first. Which provider generates (Higgsfield today), with which account and workspace, and the limits come from the settings of the campaign: its own, else its always-on base's, else global (`bb brandwise config list --campaign <c>` shows them and where each comes from; `bb brandwise providers status --campaign <c>` says whether its account is signed in). Pass `--campaign` to `creative cost` too, otherwise the global settings are used.
 
+Start from a style when one fits: a style is a ready recipe (prompt template, model, aspect) that you fill through slots with `--style <id> --slot <name>="<text>"`. Which styles exist, how to choose one and how to fill it is the creative-styles skill. Write a prompt of your own with `--prompt` only when no style fits; the two cannot be combined.
+
 | Command | Effect |
 | --- | --- |
 | `bb brandwise creative models [--video\|--image] [--campaign <c>]` | The models the provider offers. |
 | `bb brandwise creative model <model-id> [--campaign <c>]` | The parameters of one model and which media it takes. Read this before using a model you have not used. |
-| `bb brandwise creative cost --prompt "<text>" [--campaign <c>] [--model ..] [same flags as generate]` | Estimate in the provider's unit (credits); spends nothing. Shows the per-generation limit and every daily budget that applies. |
-| `bb brandwise creative generate --prompt "<text>" --campaign <c> [--model ..] [--aspect ..] [--resolution ..] [--ref <image>]... [--start-image <image>] [--end-image <image>] [--video-ref <file>]... [--audio-ref <file>]... [--duration <n>] [--param name=value]... [--name <n>] [--role creative\|source] [--max-credits N] [--wait-seconds 18]` | Checks cost and limits, starts the job, waits up to `--wait-seconds`, and registers the result as an AI-flagged asset (model, prompt, job id, cost in provenance). |
+| `bb brandwise creative cost (--prompt "<text>" \| --style <id> --slot <name>="<text>"...) [--campaign <c>] [--model ..] [same flags as generate]` | Estimate in the provider's unit (credits); spends nothing. Shows the per-generation limit and every daily budget that applies. |
+| `bb brandwise creative generate (--prompt "<text>" \| --style <id> --slot <name>="<text>"...) --campaign <c> [--model ..] [--aspect ..] [--resolution ..] [--ref <image>]... [--start-image <image>] [--end-image <image>] [--video-ref <file>]... [--audio-ref <file>]... [--duration <n>] [--param name=value]... [--name <n>] [--role creative\|source] [--max-credits N] [--wait-seconds 18]` | Checks cost and limits, starts the job, waits up to `--wait-seconds`, and registers the result as an AI-flagged asset (model, prompt, job id, cost and the style, if one was used, in provenance). |
 | `bb brandwise creative collect <job-id> [--wait-seconds 18]` | Finish a job that was still running; safe to repeat (same asset). |
 
 ### Which media a model takes
