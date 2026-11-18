@@ -64,7 +64,7 @@ run("virality: numbers as of each entry's own ages, judged against the whole com
       }
     }
     const metrics = createMetrics({ core, sources: [] });
-    const titled = async (campaign: Campaign, asOf = now, opts?: { channel?: string; last?: number }) => new Map((await metrics.virality(campaign, asOf, opts)).map((v) => [v.title, v]));
+    const titled = async (campaign: Campaign, asOf = now, opts?: { channel?: string; last?: number; entryIds?: string[] }) => new Map((await metrics.virality(campaign, asOf, opts)).map((v) => [v.title, v]));
 
     const all = await titled(company);
     assert.equal(all.size, plans.length - 3, "every entry of the company and the campaign under it, none of the other company");
@@ -83,6 +83,9 @@ run("virality: numbers as of each entry's own ages, judged against the whole com
     const onStory = await titled(company, now, { channel: "story" });
     assert.deepEqual([...onStory.keys()], ["Story 7", "Story 8", "Story 9"], "one channel");
     assert.deepEqual([...(await titled(company, now, { last: 2 })).keys()], ["Young", "Reach only"], "the last two");
+    const asked = await titled(company, now, { entryIds: [ids.get("Story 8")!, ids.get("Hit")!, ids.get("Stranger 5")!] });
+    assert.deepEqual([...asked.keys()], ["Hit", "Story 8"], "the entries asked for, newest first, and none of another company");
+    assert.deepEqual(asked.get("Hit"), all.get("Hit"), "judged as it is among all: against the company, not against the entries asked for");
     const ofLaunch = await titled(launch);
     assert.equal(ofLaunch.size, 11, "asked for a campaign: its own entries");
     assert.deepEqual([ofLaunch.get("Hit")!.ages["24h"].ratio, ofLaunch.get("Hit")!.verdict], [4, "viral"], "still judged against the company, not against its own ten posts (median 1,500)");

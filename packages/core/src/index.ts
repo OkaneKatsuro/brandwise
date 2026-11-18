@@ -8,6 +8,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import pg from "pg";
 import { createContext } from "./context/index.ts";
 import { nodeNet } from "./context/research.ts";
+import { createMap } from "./map/index.ts";
 import { createSettings, type Scope, type SettingValue } from "./settings.ts";
 import { SETTING_FIELDS, providerById, type ProviderConfig } from "./providers/index.ts";
 
@@ -454,6 +455,9 @@ export function createCore(cfg: CoreConfig) {
   // (docs/context-styles-map.md, steps 1 and 2).
   const context = createContext({ pool, saveAsset: assets.save, net: nodeNet });
 
-  return { campaigns, calendar, publishing, channels, assets, settings, generation, context, pool, close: async () => { await pool.end(); s3.destroy(); } };
+  // The company map: one read of where everything of a company came from and where it went (docs/map.md).
+  const map = createMap({ pool, campaigns, context });
+
+  return { campaigns, calendar, publishing, channels, assets, settings, generation, context, map, pool, close: async () => { await pool.end(); s3.destroy(); } };
 }
 export type Core = ReturnType<typeof createCore>;

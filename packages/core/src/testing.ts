@@ -13,6 +13,7 @@ export async function purge(core: ReturnType<typeof createCore>, prefix: string)
   await run(`delete from email_entry where entry_id in (select id from content_calendar where campaign_id in (${ids}))`);
   await run(`delete from email_render where template_version_id in (select id from email_template_version where campaign_id in (${ids}))`);
   await run(`delete from content_calendar where campaign_id in (${ids})`);
+  await run(`delete from asset_link where parent_id in (select id from asset where campaign_id in (${ids})) or child_id in (select id from asset where campaign_id in (${ids}))`);
   await run(`delete from asset where campaign_id in (${ids})`);
   await run("delete from campaign where name like $1 and parent_id is not null");
   await run("delete from campaign where name like $1");
