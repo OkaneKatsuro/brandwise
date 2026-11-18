@@ -66,7 +66,7 @@ Run these as a person, on a machine with BrandWise. Agents do not add packs or s
 
 ## Publishing
 
-Put the pack at the top of a public git repository that is reachable over https. Whoever wants it runs:
+Put the pack at the top of a public git repository on a public host, reachable over https at the address you give out: a redirect is not followed. Whoever wants it runs:
 
 ```
 bb brandwise style add https://github.com/<owner>/<repository>
