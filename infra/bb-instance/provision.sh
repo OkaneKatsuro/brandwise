@@ -181,6 +181,6 @@ case "${1:-}" in
   up) start; apply ;;
   apply) apply ;;
   status) status ;;
-  down) tailnet_unpublish; bb-app stop --data-dir "$data_dir" ;;
+  down) tailnet_unpublish; "${bb_app_cmd[@]}" stop --data-dir "$data_dir" ;;
   *) sed -n '2,7p' "$0" >&2; exit 2 ;;
 esac
