@@ -56,8 +56,12 @@ Times without an offset are read in the server's local time and shown in UTC.
 | `bb brandwise metrics campaign [--campaign <c>] [--as-of <ISO>]` | The same for every published entry of the campaign (an always-on base includes the campaigns under it), ending with the funnel: exposures, clicks, site visits, leads, orders, revenue. Site numbers come from GA4 with a delay of hours. |
 | `bb brandwise metrics sources` | Which sources exist, the channels they measure and what they can report. |
 | `bb brandwise metrics links <id>` | Our short links of a published post: where each leads, clicks, unique visitors, and requests by previews and crawlers (not counted). |
+| `bb brandwise metrics virality [--campaign <c>] [--channel <ch>] [--last 20] [--as-of <ISO>]` | Which entries spread beyond what is usual for the company, newest first: channel, age, exposures now, the ratio at 1 hour and at 24 hours, the share rate at 24 hours, the verdict and the creative's style. A ratio is the entry's exposures at that age divided by the median of the company's previous 20 entries on the same channel at the same age (`x4.00` = four times the usual). |
+| `bb brandwise metrics styles [--campaign <c>] [--as-of <ISO>]` | The same per creative style: entries, median ratio at 24 hours, median share rate, how many went viral. `none` holds the entries whose creative was not made from a style. Read it before you choose a style. |
 
 Read these before you say how a post or an e-mail performed; never estimate numbers yourself.
+
+The verdict is a rule, taken 24 hours after the entry reached its audience, and you never overrule or guess it: `viral` (at least the company's viral ratio, 3 unless a person changed it, and shared at least as often as its posts usually are), `above` (from x1.50), `typical`, `below` (under x0.67), `unknown`. `unknown` means the numbers do not allow a verdict: the entry is younger than 24 hours, no source measures exposures on its channel, or the channel has fewer than 5 earlier entries with numbers. Say that, not that the post did badly. A high ratio at 1 hour on a young entry is the early sign that it is taking off.
 
 ## Assets
 
