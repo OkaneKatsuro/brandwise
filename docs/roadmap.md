@@ -90,7 +90,7 @@ Done when: the 3rd post of a day on a channel with a limit of 2 moves to the nex
 
 Agreed on the wizard via bb (a question-asking tool), then a regular thread.
 
-1. The **bundle** is a folder `~/.bb-brandwise/product/<always-on base campaign id>/` with `product.md`, `audience.md`, `claims.md`, `constraints.md`, `voice.md` and a `derived/` subfolder (positioning, keywords, messages). Read and write via `bb brandwise product get|set <file>`. No new storage.
+1. The **bundle** belongs to the always-on base campaign and is kept in Postgres as versions (table `context_doc`, `context-styles-map.md` step 1): `product.md`, `audience.md`, `claims.md`, `constraints.md`, `voice.md` and `derived/<name>.md` (positioning, keywords, messages). Read and write via `bb brandwise product get|set <file>`; `product history <file>` shows who changed it and when, a person confirms it with `product confirm`, and `product import` brings in a bundle that was a folder under `~/.bb-brandwise/product/`.
 2. The **wizard** is the skill `product-onboarding`: the thread asks questions with a question tool (one topic per screen: what we sell, to whom, how we differ, what we can and cannot claim, tone, markets and languages, forbidden topics), and after the answers writes the files via `product set`.
 3. Then **compilation**: another thread (role "strategist", item 7) reads the bundle and produces `derived/`. A human approves.
 4. The Campaigns page gets a "Start wizard" button (opens a thread with the skill) and a list of the bundle's files with in-text editing.
