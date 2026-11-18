@@ -113,7 +113,7 @@ bb brandwise calendar list                                   # within a minute t
 
 **5. Optional parts**
 
-- **E-mail templates (MJML, full-page previews):** `(cd packages/email-engine && npm install)`, then `provision.sh apply`. It also needs Chrome Headless Shell for the pictures, which the video engine downloads.
+- **E-mail templates (MJML, full-page previews) and the company's look (`research look`):** `(cd packages/email-engine && npm install)`, then `provision.sh apply`. It also needs Chrome Headless Shell for the pictures, which the video engine downloads.
 - **Video (Remotion):** `(cd packages/video-remotion && npm install)`, then `provision.sh apply`. Remotion has its own licence, see its README.
 - **Tests:** `cd packages/core && npm test` (needs the infrastructure from step 3).
 - **Production:** point `DATABASE_URL` and the six `S3_*` variables in `.env` at a managed Postgres and any S3-compatible bucket (examples in `.env.example`), run `provision.sh apply`. To reach the instance from other devices, see "Reaching the instance from other devices" in [`.claude/skills/bb-instance/SKILL.md`](.claude/skills/bb-instance/SKILL.md); never bind it to `0.0.0.0`, because its agents run shell commands.

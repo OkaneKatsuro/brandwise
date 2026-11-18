@@ -93,12 +93,14 @@ Generate directly, never by starting a thread, and never by running a provider's
 
 Start from a style when one fits: a style is a ready recipe (prompt template, model, aspect) that you fill through slots with `--style <id> --slot <name>="<text>"`. Which styles exist, how to choose one and how to fill it is the creative-styles skill. Write a prompt of your own with `--prompt` only when no style fits; the two cannot be combined.
 
+The company's look (the image style and palette of its confirmed `design.json`) is put in front of every prompt by code, with `--style` and with `--prompt`: never repeat the colours or the image style in a slot or a prompt. `creative cost --campaign <c>` says in one line whether the look is applied (without `--campaign` it knows no company and no look); `--no-brand` leaves it out, only when the user asks for a creative outside the brand.
+
 | Command | Effect |
 | --- | --- |
 | `bb brandwise creative models [--video\|--image] [--campaign <c>]` | The models the provider offers. |
 | `bb brandwise creative model <model-id> [--campaign <c>]` | The parameters of one model and which media it takes. Read this before using a model you have not used. |
-| `bb brandwise creative cost (--prompt "<text>" \| --style <id> --slot <name>="<text>"...) [--campaign <c>] [--model ..] [same flags as generate]` | Estimate in the provider's unit (credits); spends nothing. Shows the per-generation limit and every daily budget that applies. |
-| `bb brandwise creative generate (--prompt "<text>" \| --style <id> --slot <name>="<text>"...) --campaign <c> [--model ..] [--aspect ..] [--resolution ..] [--ref <image>]... [--start-image <image>] [--end-image <image>] [--video-ref <file>]... [--audio-ref <file>]... [--duration <n>] [--param name=value]... [--name <n>] [--role creative\|source] [--max-credits N] [--wait-seconds 18]` | Checks cost and limits, starts the job, waits up to `--wait-seconds`, and registers the result as an AI-flagged asset (model, prompt, job id, cost and the style, if one was used, in provenance). |
+| `bb brandwise creative cost (--prompt "<text>" \| --style <id> --slot <name>="<text>"...) [--campaign <c>] [--model ..] [same flags as generate]` | Estimate in the provider's unit (credits); spends nothing. Shows the per-generation limit and every daily budget that applies, and whether the company's look stands in front of the prompt. |
+| `bb brandwise creative generate (--prompt "<text>" \| --style <id> --slot <name>="<text>"...) --campaign <c> [--model ..] [--aspect ..] [--resolution ..] [--ref <image>]... [--start-image <image>] [--end-image <image>] [--video-ref <file>]... [--audio-ref <file>]... [--duration <n>] [--param name=value]... [--name <n>] [--role creative\|source] [--no-brand] [--max-credits N] [--wait-seconds 18]` | Checks cost and limits, starts the job, waits up to `--wait-seconds`, and registers the result as an AI-flagged asset (model, prompt, job id, cost, the style, if one was used, and the version of the look that was applied in provenance). |
 | `bb brandwise creative collect <job-id> [--wait-seconds 18]` | Finish a job that was still running; safe to repeat (same asset). |
 
 ### Which media a model takes

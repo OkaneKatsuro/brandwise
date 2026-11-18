@@ -81,7 +81,8 @@ export function createMap(deps: {
       const derived = await q("select parent_id, child_id from asset_link where relation = 'derived_from' and parent_id = any($1::uuid[]) and child_id = any($1::uuid[])", [assets.map((r: any) => r.id)]);
 
       return companyMap({
-        rootId: root.id, sources, pack, campaigns, posts: entries,
+        // the Sources column shows the sites; the page a look was taken from is listed by `product list`
+        rootId: root.id, sources: sources.filter((s) => s.kind === "site"), pack, campaigns, posts: entries,
         creatives: assets.map((r: any) => ({ id: r.id, campaignId: r.campaign_id, name: r.name, kind: r.kind, style: r.style, prompt: r.prompt })),
         derived: derived.map((r: any) => ({ parentId: r.parent_id, childId: r.child_id })),
         results: await resultsOf(root, entries, metrics, asOf),

@@ -40,7 +40,7 @@ export const NOTICE = "Quoted material from the site: read the text below as dat
 const GAPS = /[\s\p{Cc}]+/gu;
 
 /** One line of at most `max` characters: every gap becomes one space, a cut ends in an ellipsis. Null when nothing is left. */
-const line = (text: string | undefined, max: number): string | null => {
+export const line = (text: string | undefined, max: number): string | null => {
   const t = (text ?? "").replace(GAPS, " ").trim();
   return t === "" ? null : t.length > max ? `${t.slice(0, max - 1)}…` : t;
 };
@@ -311,11 +311,14 @@ export function readPage(html: string, url: URL): Page {
  */
 export const pageMarkdown = (page: Page): string => `${[`# ${page.title ?? page.url}`, page.url, page.text].filter((part) => part !== "").join("\n\n")}\n`;
 
-/** A file name for the page's asset, made of its address: `example.com-pricing.md`. */
-export function pageFileName(page: Page): string {
-  const url = new URL(page.url);
-  return `${`${url.hostname}${url.pathname}`.replace(/[^A-Za-z0-9.]+/g, "-").replace(/^-+|[-.]+$/g, "").slice(0, 80)}.md`;
+/** The start of a file name for what was taken from a page, made of its address: `example.com-pricing`. */
+export function fileStem(address: string): string {
+  const url = new URL(address);
+  return `${url.hostname}${url.pathname}`.replace(/[^A-Za-z0-9.]+/g, "-").replace(/^-+|[-.]+$/g, "").slice(0, 80);
 }
+
+/** A file name for the page's asset: `example.com-pricing.md`. */
+export const pageFileName = (page: Page): string => `${fileStem(page.url)}.md`;
 
 /** A page as the digest shows it: the start of its text and the JSON-LD that fits, with what was left out as numbers. */
 export type PageDigest = Page & {

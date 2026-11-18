@@ -20,7 +20,7 @@ const EMPTY: MapParts = {
 test("every link the data records is one edge, from where a thing came from to the thing", () => {
   const map = companyMap({
     ...EMPTY,
-    sources: [{ site: "https://acme.example", readAt: "2026-11-02T08:00:00.000Z", pages: 7, notes: [] }],
+    sources: [{ kind: "site", site: "https://acme.example", readAt: "2026-11-02T08:00:00.000Z", pages: 7, notes: [] }],
     pack: { files: [version("product.md", 2, null), version("voice.md", 1, "2026-11-03T08:00:00.000Z")], missing: ["audience.md", "claims.md", "constraints.md"] },
     campaigns: [campaign("acme", null, "always_on"), campaign("launch", "acme")],
     creatives: [creative("teaser", "launch"), creative("hero", "launch", "product-hero"), creative("logo", "acme")],
@@ -67,7 +67,7 @@ test("a company with nothing still has its pack, which says what is missing and 
 });
 
 test("a site read for a pack that is not written yet leads to the empty pack", () => {
-  const map = companyMap({ ...EMPTY, sources: [{ site: "https://acme.example", readAt: "2026-11-02T08:00:00.000Z", pages: 3, notes: [] }] });
+  const map = companyMap({ ...EMPTY, sources: [{ kind: "site", site: "https://acme.example", readAt: "2026-11-02T08:00:00.000Z", pages: 3, notes: [] }] });
   assert.deepEqual(pairs(map.edges), ["source:https://acme.example -> pack"]);
 });
 

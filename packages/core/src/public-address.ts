@@ -1,6 +1,6 @@
 // Which IP addresses belong to the public internet, and the lookup that holds a connection to them. An address the core is asked
-// to reach (a site to read, a repository of a style pack) comes from outside, so it is only ever requested when it is public:
-// everything else is this machine, the network around it or a cloud's metadata service.
+// to reach (a site to read, what a rendered page fetches, a repository of a style pack) comes from outside, so it is only ever
+// requested when it is public: everything else is this machine, the network around it or a cloud's metadata service.
 import { BlockList, isIP, type LookupFunction } from "node:net";
 
 type Network = readonly [address: string, bits: number];

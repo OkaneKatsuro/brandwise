@@ -11,10 +11,11 @@ import { html, madeUp, nav, PUBLIC, type Served } from "./testing.ts";
 const THIN = "almost no text: the page is probably rendered in the browser";
 const words = (n: number) => "Widgets for founders. ".repeat(n).trim();
 
-/** A context on the file's core that reads sites from the made-up network. */
+/** A context on the file's core that reads sites from the made-up network; `sites` are the sites among a pack's sources. */
 function setUp(core: Core, routes: Record<string, Served>) {
   const { net, seen } = madeUp({ "acme.example": [PUBLIC], "shop.example": [PUBLIC] }, routes);
-  return { seen, context: createContext({ pool: core.pool, saveAsset: core.assets.save, net }) };
+  const context = createContext({ pool: core.pool, saveAsset: core.assets.save, net });
+  return { seen, context, sites: async (campaignId: string) => (await context.sources(campaignId)).filter((s) => s.kind === "site") };
 }
 const acme = (): Record<string, Served> => ({
   "https://acme.example/robots.txt": { type: "text/plain", body: "User-agent: *\nDisallow: /admin/\n" },
@@ -82,7 +83,7 @@ dbTest("reading a site again adds source rows and, while its text is unchanged, 
 });
 
 dbTest("the sources of a pack: each site that was read for it, as of its latest read, through any campaign of the company", async ({ core }) => {
-  const { context } = setUp(core, {
+  const { context, sites } = setUp(core, {
     ...acme(),
     "http://shop.example:8080/": html("Shop", `${nav("/cart")}<p>${words(20)}</p>`),
     "http://shop.example:8080/cart": html("Cart", `<p>${words(20)}</p>`),
@@ -93,12 +94,12 @@ dbTest("the sources of a pack: each site that was read for it, as of its latest 
   assert.deepEqual(await context.sources(base.id), [], "a pack nothing was read for");
 
   await context.researchSite(base.id, "https://acme.example/", { actor: "cli" });
-  const [whole] = await context.sources(launch.id);
+  const [whole] = await sites(launch.id);
   assert.deepEqual([whole.site, whole.pages, whole.notes], ["https://acme.example", 3, [THIN]], "what the reader noted about its pages, each note once");
   await context.researchSite(launch.id, "http://shop.example:8080/", { actor: "cli" });
   await context.researchSite(launch.id, "https://acme.example/", { pages: 2, actor: "cli" });
 
-  const sources = await context.sources(base.id);
+  const sources = await sites(base.id);
   assert.deepEqual(sources.map((s) => [s.site, s.pages, s.notes]), [["https://acme.example", 2, []], ["http://shop.example:8080", 2, []]], "one entry per site, the site read last first; of the two reads of a site, the later");
   assert.ok(Date.parse(sources[0].readAt) > Date.parse(sources[1].readAt) && Date.parse(sources[1].readAt) > Date.parse(whole.readAt), "with when it was read");
   assert.deepEqual(await context.sources(launch.id), sources);
@@ -107,14 +108,14 @@ dbTest("the sources of a pack: each site that was read for it, as of its latest 
 });
 
 dbTest("a source row outlives its asset and goes with its company", async ({ core }) => {
-  const { context } = setUp(core, acme());
+  const { context, sites } = setUp(core, acme());
   const base = await core.campaigns.add({ name: "base", kind: "always_on" });
   const digest = await context.researchSite(base.id, "https://acme.example/", { actor: "cli" });
   await core.assets.delete(digest.pages[1].assetId);
   assert.deepEqual((await rowsOf(core, base.id)).map((r) => [r.ref, r.asset_id]), [
     ["https://acme.example/", digest.pages[0].assetId], ["https://acme.example/pricing", null], ["https://acme.example/about", digest.pages[2].assetId],
   ], "that the page was read stays on record when its text is deleted");
-  assert.equal((await context.sources(base.id))[0].pages, 3);
+  assert.equal((await sites(base.id))[0].pages, 3);
 
   for (const page of [digest.pages[0], digest.pages[2]]) await core.assets.delete(page.assetId);
   await core.pool.query("delete from campaign where id = $1", [base.id]);
