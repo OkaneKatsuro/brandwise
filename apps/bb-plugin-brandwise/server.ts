@@ -4,7 +4,7 @@
 // Approved entries are fired by `calendar run-due`, which a bb automation runs every minute (infra/bb-instance/provision.sh).
 import { defineRpcContract, type BbPluginApi, type PluginSettingDescriptor } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { cookieJarFor, createCore, downloadResult, isFailed, MODEL_ID, PROVIDERS, REVIEW_REASONS, sessionFromCookieJar, STATUSES, type Core, type GenSpec, type Provider, type Scope, type SettingValue } from "./core/index.ts";
+import { cookieJarFor, createCore, downloadResult, isFailed, MAX_PROMPT, MODEL_ID, PROVIDERS, REVIEW_REASONS, sessionFromCookieJar, STATUSES, type Core, type GenSpec, type Provider, type Scope, type SettingValue } from "./core/index.ts";
 import { createHmac, randomBytes } from "node:crypto";
 import * as cp from "node:child_process";
 import * as fsx from "node:fs";
@@ -30,7 +30,7 @@ import { createEditorCli } from "./editor.ts";
 import { createMetricsCli } from "./metrics-cli.ts";
 import { createMetrics } from "./core/metrics/index.ts";
 import { styleCli } from "./style-cli.ts";
-import { styledSpec, type StyleRef } from "./core/styles/index.ts";
+import type { StyleRef } from "./core/styles/index.ts";
 import { randomUUID } from "node:crypto";
 import { MODES, allowedModes, applyMode, appliedMode, defHashOf, isModeName, type ModeName } from "./modes.ts";
 
@@ -828,7 +828,7 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise calendar history <id>   (every action on the entry: who, when, the send-back notes and reasons)",
     "  bb brandwise calendar unapprove <id>   (upcoming approved entry back to pending_approval; entries whose time has passed accept no action)",
     "  bb brandwise calendar approve|cancel <id>",
-    "  (calendar add, edit, request-changes, unapprove, approve and cancel, and product set, confirm and import take [--as <label>]: the history records cli:<label>)",
+    "  (calendar add, edit, request-changes, unapprove, approve and cancel, product set, confirm and import, and style add and enable take [--as <label>]: it is recorded as cli:<label>)",
     "  bb brandwise metrics sources | entry <id> | campaign [--campaign <c>] [--as-of <ISO>]   (numbers of published entries from every source, any channel; unknown is shown as missing, never 0)",
     "  bb brandwise metrics links <entry>   (our short links of a published post: where each leads, clicks, unique visitors, bot requests)",
     "  bb brandwise metrics virality [--campaign <c>] [--channel <ch>] [--last 20] [--as-of <ISO>]   (which entries spread beyond what is usual for the company, newest first: exposures 1 and 24 hours after publishing against the median of its previous 20 entries on the channel; the verdict viral, above, typical, below or unknown is a rule, not an opinion)",
@@ -866,7 +866,8 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise creative cost (--prompt <text> | --style <id> --slot name=value...) [--campaign <c>] [--model nano_banana_pro] [--aspect 4:5] [--resolution 2k] [media and parameters as in generate]   (estimate, spends nothing)",
     "  bb brandwise creative generate (--prompt <text> | --style <id> --slot name=value...) [--model ..] [--aspect ..] [--resolution ..] [--campaign <c>] [--role creative|source] [--name <n>] [--ref <image>]... [--start-image <image>] [--end-image <image>] [--video-ref <file>]... [--audio-ref <file>]... [--duration <n>] [--param name=value]... [--max-credits N] [--wait-seconds 18]   (which media and parameters a model takes: creative model <id>; with --style the style writes the prompt and sets the model, aspect and parameters that are not given)",
     "  bb brandwise creative collect <job-id> [--wait-seconds 18]   (finish a generation that was still running)",
-    "  bb brandwise style list [--kind image|video] [--channel <c>] | style show <id>   (style recipes for creatives: what each is for, its slots, aspects and channels, the post text that goes with it, what to avoid)",
+    "  bb brandwise style list [--kind image|video] [--channel <c>] | style show <id>   (style recipes for creatives: what each is for, its slots, aspects and channels, the post text that goes with it, what to avoid; a built-in style has a bare id, a style of a pack is <pack>/<id>)",
+    "  bb brandwise style packs | style add <full path of a folder | https git address> | style enable <pack> | style disable <pack> | style remove <pack>   (style packs, styles from outside: packs lists them with source, author, licence and whether each is on; add checks the whole pack, stores it switched off and replaces a pack of that name; enable is a person's command, given after reading the pack's styles, and only then are they listed and usable; disable switches it off again, remove deletes it)",
     "  bb brandwise product list | get [<file>] | set <file> (--body <text> | --file <path>) | history <file> | confirm [<file>] [--campaign <c>]   (product pack: product.md audience.md claims.md constraints.md voice.md derived/<name>.md; shared by the always-on base and kept as versions: list shows each file's version, author and whether it is confirmed, and the sites the pack was drawn from; set adds a version that is a draft, confirm is a person's command for one file or all)",
     "  bb brandwise product import [--dir <folder>]   (bring in packs that were kept on disk, <folder>/<campaign id>/*.md, default ~/.bb-brandwise/product: a file the database does not have becomes version 1, the folder is left as it is; safe to repeat)",
     "  bb brandwise research site <url> [--pages 12] [--campaign <c>] [--as <label>]   (read a company's public site to draft its product pack from: the page at <url> and the pages its navigation, header and footer link to, 30 at most; plain HTML over http or https, public addresses only, robots.txt honoured, no browser; each page is kept as a reference asset, created by cli:<label>; prints a bounded digest of quoted material: per page its title, description, JSON-LD and the start of its text, then what was skipped and why)",
@@ -884,9 +885,9 @@ export default async function plugin(bb: BbPluginApi) {
   const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml", "--reason", "--source", "--days", "--external", "--url", "--last", "--style", "--slot", "--pages"]);
   const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, "--json", "--ai", "--stop", "--video", "--image", "--raw"]);
   /**
-   * Who did it, as recorded in an entry's history and on a version of the product pack: always "cli" or "cli:<label>" from the
-   * CLI. `--as` is a label agents give themselves, not an identity, so it can never claim a reserved actor ("ui" is a person on a
-   * page, "auto" and "scheduler" are code).
+   * Who did it, as recorded in an entry's history, on a version of the product pack and on a style pack: always "cli" or
+   * "cli:<label>" from the CLI. `--as` is a label agents give themselves, not an identity, so it can never claim a reserved actor
+   * ("ui" is a person on a page, "auto" and "scheduler" are code).
    */
   const RESERVED_ACTORS = new Set(["ui", "auto", "scheduler", "unknown"]);
   const cliActor = (args: string[]) => {
@@ -1144,13 +1145,13 @@ export default async function plugin(bb: BbPluginApi) {
     if (duration !== undefined) params.duration = duration;
     const styleId = val(args, "--style");
     if (styleId === undefined && args.includes("--slot")) throw new Error("--slot fills a slot of a style: name the style with --style <id> (bb brandwise style list)");
-    const styled = styleId === undefined ? undefined : styledSpec({
+    const styled = styleId === undefined ? undefined : await c.styles.spec({
       style: styleId, slots: pairs(args, "--slot"), provider: (await c.generation.providerFor(scope, host())).provider.id,
       prompt: val(args, "--prompt"), model, aspect: val(args, "--aspect"), params,
     });
     const base: GenSpec = styled?.spec ?? { model: model ?? "nano_banana_pro", prompt: (val(args, "--prompt") ?? "").trim(), aspect: val(args, "--aspect"), params };
     if (base.prompt === "") throw new Error("Give --prompt <text>, or --style <id> with its slots (bb brandwise style list)");
-    if (base.prompt.length > 2000) throw new Error(`The prompt is ${base.prompt.length} characters, the limit is 2000: shorten ${styled ? "the slot values" : "it"}`);
+    if (base.prompt.length > MAX_PROMPT) throw new Error(`The prompt is ${base.prompt.length} characters, the limit is ${MAX_PROMPT}: shorten ${styled ? "the slot values" : "it"}`);
     const one = (name: string) => { const v = val(args, name); return v === undefined ? undefined : mediaFile(v); };
     return {
       spec: {
@@ -1182,7 +1183,7 @@ export default async function plugin(bb: BbPluginApi) {
       { name: "config", summary: "Provider, account and limits per scope (global or campaign)", usage: "bb brandwise config list|set|unset ..." },
       { name: "providers", summary: "Check that the account of a scope is signed in at each provider", usage: "bb brandwise providers status ..." },
       { name: "creative", summary: "Estimate, generate (Higgsfield) and collect creatives", usage: "bb brandwise creative models|model|cost|generate|collect ..." },
-      { name: "style", summary: "Style recipes for creatives: list them or show one", usage: "bb brandwise style list|show ..." },
+      { name: "style", summary: "Style recipes for creatives: list them or show one; add, switch on or off, or remove a style pack", usage: "bb brandwise style list|show|packs|add|enable|disable|remove ..." },
       { name: "product", summary: "Read, write, confirm or import the versioned Markdown product pack of a brand", usage: "bb brandwise product list|get|set|history|confirm|import ..." },
       { name: "research", summary: "Read a company's public site into a digest to draft its product pack from", usage: "bb brandwise research site <url> ..." },
       { name: "video", summary: "Remotion video projects: seed, compositions, preview, render, collect", usage: "bb brandwise video seed|compositions|preview|render|collect ..." },
@@ -1210,7 +1211,6 @@ export default async function plugin(bb: BbPluginApi) {
             ...(v.error ? [`error: ${v.error}`] : []),
           ].join("\n"));
         }
-        if (area === "style") return styleCli(action, args, { val, positional, reply, usage });
         const c = need();
         const campaign = async () => (await c.campaigns.resolve(val(args, "--campaign"))).id;
         if (area === "campaign" && action === "list") {
@@ -1524,6 +1524,7 @@ export default async function plugin(bb: BbPluginApi) {
             ? `Done: asset ${r.asset!.id} (${r.asset!.name}, ${r.asset!.width ?? "?"}x${r.asset!.height ?? "?"}), ~${r.credits} credits. Show it with ::creative{ids="${r.asset!.id}"}`
             : `Still running (status ${r.status}), job ${jobId}. Finish with: bb brandwise creative collect ${jobId}`);
         }
+        if (area === "style") return styleCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
         if (area === "product") return productCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
         if (area === "research") return researchCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
         if (area === "video") return video.cli(action, args, { val, positional, reply, usage });

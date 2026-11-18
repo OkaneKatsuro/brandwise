@@ -1,0 +1,18 @@
+{
+  "id": "comparison-table",
+  "title": "Comparison table",
+  "kind": "image",
+  "aspects": ["4:5", "1:1"],
+  "channels": ["linkedin", "instagram", "facebook", "threads", "telegram", "email"],
+  "slots": {
+    "ours": "The product's name as the heading of the highlighted column: three words at most, no quotation marks. Example: Loopwork",
+    "theirs": "What it is compared with, as the heading of the other column: a way of working or a category, never a competitor's name, three words at most. Example: Spreadsheets",
+    "rows": "Exactly three criteria the product meets and the other side does not, each three words at most, separated by semicolons. Example: Live numbers; One-click reports; Shared with the team"
+  },
+  "prompt": "Comparison card in clean, flat editorial design, seen straight from the front. A soft off-white background with wide margins. In the centre a table with thin light-grey rules and rounded outer corners: a label column on the left, then two narrow columns of equal width. The first of the two is headed \"{{theirs}}\" in medium-grey regular sans-serif. The second is headed \"{{ours}}\" in bold and stands on a panel in one calm accent colour that is slightly raised with a soft shadow, so that it reads as the choice. The table has exactly three rows; their labels, from top to bottom, are exactly these: {{rows}}. In every row the first column shows a small grey cross and the highlighted column a bold check mark in the accent colour. All text is large, dark, sans-serif, spelled exactly as given and legible at thumbnail size. Nothing else is written anywhere. No fourth row, no numbers, no prices, no logos, no people, no watermark.",
+  "models": { "higgsfield": "nano_banana_pro" },
+  "version": 1,
+  "use": "A choice the reader is already weighing: the product against the way they do the job today (a spreadsheet, doing it by hand, an agency). For the weeks after a launch, a section of a nurture e-mail, or the answer to \"why not just use what we have\".",
+  "copy": "Open with the choice in the reader's own words (\"Still closing the month in a spreadsheet?\"). Then one sentence per row, in the order of the image, that says what the difference means in their day. Close with one link to a page that backs every row.",
+  "avoid": "A competitor's name or logo in the image: compare with a way of working, and read constraints.md of the product pack before naming anyone in the post. A row that claims.md does not cover: every check mark is a claim. More than three rows, or criteria over three words: small text gets misspelled, so read every word on the result. A row the other side wins, added to look fair: the card shows one side only, say the rest in the post."
+}

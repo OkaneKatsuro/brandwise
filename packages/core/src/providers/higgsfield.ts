@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Auth, GenSpec, Job, Provider, ProviderConfig } from "./index.ts";
-import { MODEL_ID } from "./model-id.ts";
+import { MODEL_ID } from "./input.ts";
 
 const FAILED = new Set(["failed", "error", "canceled", "cancelled", "nsfw", "rejected", "expired"]);
 export const isFailed = (status: string) => FAILED.has(status.toLowerCase());
