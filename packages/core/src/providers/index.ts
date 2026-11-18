@@ -95,4 +95,9 @@ export const SETTING_FIELDS: SettingField[] = [
   },
   { key: "generation.provider", label: "Provider", description: "Which provider generates creatives.", group: "Generation", type: "select", options: PROVIDERS.map((p) => p.id), default: PROVIDERS[0].id },
   ...PROVIDERS.flatMap((p) => [...p.fields, ...budgetFields(p)].map((f) => ({ ...f, key: `${p.id}.${f.key}`, group: p.label }))),
+  // Virality is judged against the company's own history (metrics/virality.ts), so the company says how far above it counts as viral.
+  {
+    key: "virality.viralRatio", label: "Viral ratio", group: "Virality", type: "number", default: 3,
+    description: "A post is viral when, 24 hours after it was published, it has at least this many times the views that are usual for the company on that channel (the median of its previous 20 posts there) and is shared at least as often as they were. Read from the company, the always-on base: a value set on a campaign under it is not used.",
+  },
 ];

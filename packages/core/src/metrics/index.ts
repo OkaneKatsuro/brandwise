@@ -1,11 +1,16 @@
 // The metrics service: one way to read the numbers of any calendar entry, whatever measured it. Live sources (e-mail) are asked for
 // the moment wanted; pull sources are read from the snapshots `pull` stored. The regulator, the CLI and later the pages read from here,
 // never from a channel's own tables.
-import type { CalendarEntry, Core } from "../index.ts";
+import type { CalendarEntry, Campaign, Core } from "../index.ts";
 import { measuresChannel, merge, PartialPullError, type EntryMetrics, type EntryRef, type MetricsSource, type Snapshot } from "./domain.ts";
 import { metricsStore } from "./store.ts";
+import { AGES, NO_STYLE, byStyle, earlierOf, judge, type Age, type AgedEntry, type StyleVirality, type Virality } from "./virality.ts";
 
 export * from "./domain.ts";
+export type { StyleVirality } from "./virality.ts";
+
+/** An entry's virality with what a person needs to recognise it. `exposures` is the number at the moment asked, not at an age. */
+export type EntryVirality = Virality & { title: string; exposures: number | null; style: string };
 
 const refOf = (e: CalendarEntry): EntryRef => ({ id: e.id, campaignId: e.campaignId, channel: e.channel, externalId: e.externalId, externalUrl: e.externalUrl });
 
@@ -45,11 +50,58 @@ export function createMetrics(deps: { core: Core; sources: MetricsSource[] }) {
     });
   }
 
+  /** The campaign itself and, for an always-on base, every campaign under it. */
+  async function under(campaignId: string): Promise<Set<string>> {
+    return new Set((await core.campaigns.list()).filter((c) => c.id === campaignId || c.rootId === campaignId).map((c) => c.id));
+  }
+
   /** Entries of a campaign (itself and, for an always-on base, every campaign under it) that reached an audience. */
   async function published(campaignId: string): Promise<CalendarEntry[]> {
-    const campaigns = (await core.campaigns.list()).filter((c) => c.id === campaignId || c.rootId === campaignId);
-    const under = new Set(campaigns.map((c) => c.id));
-    return (await core.calendar.list()).filter((e) => under.has(e.campaignId) && e.status === "published");
+    const campaigns = await under(campaignId);
+    return (await core.calendar.list()).filter((e) => campaigns.has(e.campaignId) && e.status === "published");
+  }
+
+  /** The style each creative was made from (`provenance.style.id`, written by `creative generate --style`), by asset id. */
+  async function stylesOf(assetIds: string[]): Promise<Map<string, string>> {
+    if (assetIds.length === 0) return new Map();
+    const rows = (await core.pool.query("select id, provenance #>> '{style,id}' as style from asset where id = any($1::uuid[]) and provenance #>> '{style,id}' is not null", [assetIds])).rows;
+    return new Map(rows.map((r: any) => [r.id, r.style]));
+  }
+
+  /**
+   * The virality of a campaign's entries, newest first (docs/analytics.md). Each is judged against its company, the always-on base
+   * with every campaign under it, whichever campaign is asked for. Numbers are read as of each age after an entry reached its
+   * audience, for the entry and for the earlier entries alike, so a 24-hour number only ever meets 24-hour numbers; an entry younger
+   * than an age has no number at it. An entry that had not reached an audience by `asOf` is neither judged nor part of a baseline.
+   */
+  async function virality(campaign: Campaign, asOf: Date, opts: { channel?: string; last?: number } = {}): Promise<EntryVirality[]> {
+    const company = await published(campaign.rootId);
+    const current = await forEntries(company, asOf);
+    const pool = company.flatMap((entry, i) => {
+      const startedAt = current[i].startedAt;
+      return startedAt !== null && Date.parse(startedAt) <= asOf.getTime() ? [{ entry, channel: entry.channel, startedAt, exposures: current[i].values.exposures ?? null }] : [];
+    });
+    const mine = await under(campaign.id);
+    const listed = pool.filter((p) => mine.has(p.entry.campaignId) && (!opts.channel || p.channel === opts.channel))
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, opts.last);
+    // every entry has its own moments (its start plus each age), so each is read on its own: only the listed entries and the
+    // earlier ones their baselines are taken from, not the company's whole history
+    const needed = new Set(listed.flatMap((p) => [p, ...earlierOf(p, pool)]));
+    const aged = await Promise.all([...needed].map(async (p): Promise<AgedEntry> => {
+      const at: AgedEntry["at"] = {};
+      for (const age of Object.keys(AGES) as Age[]) {
+        const moment = new Date(Date.parse(p.startedAt) + AGES[age]);
+        if (moment.getTime() <= asOf.getTime()) at[age] = (await forEntries([p.entry], moment))[0];
+      }
+      return { entryId: p.entry.id, channel: p.channel, startedAt: p.startedAt, at };
+    }));
+    const byEntry = new Map(aged.map((a) => [a.entryId, a]));
+    const viralRatio = Number((await core.settings.resolve(campaign.rootId, "virality.viralRatio"))!.value);
+    const styles = await stylesOf(listed.flatMap((p) => (p.entry.assetId ? [p.entry.assetId] : [])));
+    return listed.map((p) => ({
+      ...judge(byEntry.get(p.entry.id)!, aged, viralRatio),
+      title: p.entry.title, exposures: p.exposures, style: (p.entry.assetId && styles.get(p.entry.assetId)) || NO_STYLE,
+    }));
   }
 
   return {
@@ -64,6 +116,11 @@ export function createMetrics(deps: { core: Core; sources: MetricsSource[] }) {
     },
     async campaign(campaignId: string, asOf: Date): Promise<EntryMetrics[]> {
       return forEntries(await published(campaignId), asOf);
+    },
+    virality,
+    /** What each style brought in a campaign, over all its entries: the virality of the entries made from it. */
+    async styles(campaign: Campaign, asOf: Date): Promise<StyleVirality[]> {
+      return byStyle(await virality(campaign, asOf));
     },
     /**
      * Ask every pull source (or one) for the current totals of the published entries of its channels and store them. Safe to repeat;
