@@ -12,6 +12,7 @@ import * as osx from "node:os";
 import * as px from "node:path";
 import { agentContract, createAgents } from "./agents.ts";
 import { productCli } from "./product.ts";
+import { researchCli } from "./research-cli.ts";
 import { createVideo, videoContract } from "./video.ts";
 import { createEmailTemplates, templatesContract } from "./email-templates.ts";
 import { sleep, slug } from "./util.ts";
@@ -863,8 +864,9 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise creative cost --prompt <text> [--campaign <c>] [--model nano_banana_pro] [--aspect 4:5] [--resolution 2k] [media and parameters as in generate]   (estimate, spends nothing)",
     "  bb brandwise creative generate --prompt <text> [--model ..] [--aspect ..] [--resolution ..] [--campaign <c>] [--role creative|source] [--name <n>] [--ref <image>]... [--start-image <image>] [--end-image <image>] [--video-ref <file>]... [--audio-ref <file>]... [--duration <n>] [--param name=value]... [--max-credits N] [--wait-seconds 18]   (which media and parameters a model takes: creative model <id>)",
     "  bb brandwise creative collect <job-id> [--wait-seconds 18]   (finish a generation that was still running)",
-    "  bb brandwise product list | get [<file>] | set <file> (--body <text> | --file <path>) | history <file> | confirm [<file>] [--campaign <c>]   (product pack: product.md audience.md claims.md constraints.md voice.md derived/<name>.md; shared by the always-on base and kept as versions: list shows each file's version, author and whether it is confirmed, set adds a version that is a draft, confirm is a person's command for one file or all)",
+    "  bb brandwise product list | get [<file>] | set <file> (--body <text> | --file <path>) | history <file> | confirm [<file>] [--campaign <c>]   (product pack: product.md audience.md claims.md constraints.md voice.md derived/<name>.md; shared by the always-on base and kept as versions: list shows each file's version, author and whether it is confirmed, and the sites the pack was drawn from; set adds a version that is a draft, confirm is a person's command for one file or all)",
     "  bb brandwise product import [--dir <folder>]   (bring in packs that were kept on disk, <folder>/<campaign id>/*.md, default ~/.bb-brandwise/product: a file the database does not have becomes version 1, the folder is left as it is; safe to repeat)",
+    "  bb brandwise research site <url> [--pages 12] [--campaign <c>] [--as <label>]   (read a company's public site to draft its product pack from: the page at <url> and the pages its navigation, header and footer link to, 30 at most; plain HTML over http or https, public addresses only, robots.txt honoured, no browser; each page is kept as a reference asset, created by cli:<label>; prints a bounded digest of quoted material: per page its title, description, JSON-LD and the start of its text, then what was skipped and why)",
     "  bb brandwise video seed --dir <empty dir>   (copy the example Remotion project to start from; or --template <id> --campaign <c> = the campaign's project folder, which the Video page opens in Remotion Studio)",
     "  bb brandwise video studio --template <id> [--campaign <c>] [--stop]   (Remotion Studio for that project, 127.0.0.1 only)",
     "  bb brandwise video compositions --dir <project>   (ids, size, duration and defaultProps of each composition)",
@@ -876,7 +878,7 @@ export default async function plugin(bb: BbPluginApi) {
   ].join("\n");
   const vals = (argv: string[], name: string) => argv.flatMap((a, i) => (a === name && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
   const val = (argv: string[], name: string) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
-  const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml", "--reason", "--source", "--days", "--external", "--url", "--last"]);
+  const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml", "--reason", "--source", "--days", "--external", "--url", "--last", "--pages"]);
   const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, "--json", "--ai", "--stop", "--video", "--image", "--raw"]);
   /**
    * Who did it, as recorded in an entry's history and on a version of the product pack: always "cli" or "cli:<label>" from the
@@ -1164,6 +1166,7 @@ export default async function plugin(bb: BbPluginApi) {
       { name: "providers", summary: "Check that the account of a scope is signed in at each provider", usage: "bb brandwise providers status ..." },
       { name: "creative", summary: "Estimate, generate (Higgsfield) and collect creatives", usage: "bb brandwise creative models|model|cost|generate|collect ..." },
       { name: "product", summary: "Read, write, confirm or import the versioned Markdown product pack of a brand", usage: "bb brandwise product list|get|set|history|confirm|import ..." },
+      { name: "research", summary: "Read a company's public site into a digest to draft its product pack from", usage: "bb brandwise research site <url> ..." },
       { name: "video", summary: "Remotion video projects: seed, compositions, preview, render, collect", usage: "bb brandwise video seed|compositions|preview|render|collect ..." },
       { name: "mode", summary: "Show or re-apply the display mode (full, minimal)", usage: "bb brandwise mode [apply | set <name>]" },
     ],
@@ -1503,6 +1506,7 @@ export default async function plugin(bb: BbPluginApi) {
             : `Still running (status ${r.status}), job ${jobId}. Finish with: bb brandwise creative collect ${jobId}`);
         }
         if (area === "product") return productCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
+        if (area === "research") return researchCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
         if (area === "video") return video.cli(action, args, { val, positional, reply, usage });
         if (area === "editor") return editorCli.editor(action, args, { val, positional, reply, usage });
         if (area === "metrics") return metricsCli(action, args, { val, positional, reply, usage });
