@@ -140,8 +140,10 @@ names the style.
   `style remove <pack>` deletes one, adding a pack again replaces it.
 - A pack's style is addressed as `<pack>/<id>`; built-in styles keep their bare id. A pack can therefore never replace a built-in
   style or another pack's.
-- A pack holds JSON, Markdown and images only: a file of any other type, a link, or a style that does not pass `parseStyle` stops
-  the install, and nothing of the pack is stored. From git only `https` is fetched, without submodules.
+- A pack holds `pack.json`, a `README.md` and a `LICENSE` if it has them, and one `styles/<id>/style.json` per style; nothing
+  else. Any other file or folder, a link, or a style that does not pass `parseStyle` stops the install, and nothing of the pack is
+  stored. From git only `https` is fetched, as a bare clone: nothing is checked out, so no hook, filter, submodule or large-file
+  store of the repository is ever used, and this machine's git configuration is left out.
 - A recipe becomes a prompt, so a pack is off after `style add` and its styles cannot be used until a person has read them and
   switched it on: `style enable <pack>` (a person's command, like `product confirm`; `style disable` switches it off again).
 - Step 6b, the Styles page: the styles there are, built-in and from packs, each with what `style show` says, and the switch of each
