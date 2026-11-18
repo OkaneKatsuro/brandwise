@@ -81,7 +81,7 @@ Status: **exists** = done in the repo, **plan** = needs to be built, **external*
 | 21 | `propose_tool` | write | 3 | proposes a new tool (status `proposed` only) | plan |
 | 22 | `get_asset` | read | 1 | asset metadata and a short-lived signed link (see `assets.md`) | plan |
 | 23 | `save_asset` | draft | 1 | saves a file to storage by hash and writes an `asset` record | plan |
-| 24 | `get_styles` | read | 1 | style recipes for creatives: what each is for, its slots, aspects and channels | **exists** as `bb brandwise style list\|show` |
+| 24 | `get_styles` | read | 1 | style recipes for creatives: what each is for, its slots, aspects and channels; the built-in ones and those of the style packs a person switched on (`<pack>/<id>`) | **exists** as `bb brandwise style list\|show`, and `style packs` for the packs. Adding, switching on and removing a pack are a person's commands, not tools: `style add\|enable\|remove`. `style disable` only takes styles away; an agent runs it when asked |
 
 `schedule_item`: a draft without publishing is tier 1, publishing to an account is tier 2, claims about price, warranty or subsidies and a new channel are tier 3.
 
