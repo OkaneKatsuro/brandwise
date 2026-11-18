@@ -11,6 +11,9 @@ downloads
 # machine-specific overrides of the instance profile
 infra/bb-instance/profile.local.env
 
+# working copies that coding agents make for themselves
+.claude/worktrees
+
 # generated reports and campaign creatives: never committed (creatives live in S3, see docs/assets.md)
 graphify-out
 .archify

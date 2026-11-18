@@ -56,13 +56,16 @@ apply() {
   "$root/tools/bootstrap.sh"
   "$root/tools/sync-plugin-core.sh"
   (cd "$plugin_dir" && bb plugin build >/dev/null)
+  # --yes below: plugins are full-trust code; this is our own plugin from this repo, installed from a local path
   first_install=0
-  if bb plugin list | grep -q '^bb-plugin-brandwise@\|^brandwise@'; then
+  if ! bb plugin list | grep -q '^bb-plugin-brandwise@\|^brandwise@'; then
+    first_install=1
+    bb plugin install "$plugin_dir" --yes
+  elif bb plugin source brandwise | grep -qxF "  resolved: path:$plugin_dir"; then
     bb plugin reload brandwise >/dev/null
   else
-    first_install=1
-    # --yes: plugins are full-trust code; this is our own plugin from this repo, installed from a local path
-    bb plugin install "$plugin_dir" --yes
+    # the repository was moved: installing from the new path moves the plugin and keeps its settings, secrets and schedules
+    bb plugin install "$plugin_dir" --yes >/dev/null
   fi
   (set -a; . "$root/.env"; set +a
    cfg() { bb plugin config brandwise set "$1" "$2" >/dev/null; }
