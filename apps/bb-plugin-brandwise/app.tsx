@@ -9,7 +9,7 @@ import { ScreenAgentTab } from "./agent-tab";
 import { SCREENS } from "./agents";
 import { VideoPage } from "./video-page";
 import { EmailPage } from "./email-page";
-import { MapPage } from "./map-page";
+import { MapPage, MapSidebar } from "./map-page";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
@@ -971,6 +971,7 @@ export default definePluginApp((app) => {
     icon: "brandwise/map",
     path: "map",
     component: MapPage,
+    experimental_sidebar: MapSidebar,
   });
   // "Start agent" in the side panel of every page above: the tab reads the page's route, so the agent knows where the user is
   for (const screen of SCREENS) {

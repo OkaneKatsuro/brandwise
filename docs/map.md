@@ -55,8 +55,8 @@ What is left out is counted per campaign, so the page can say "and 37 older post
 ## Chain and details
 
 A click selects a card. Its chain lights up and the rest is dimmed: every node it came from, back to the sites, and every node that
-came from it, however many steps away (`chain` in `packages/core/src/map/domain.ts`). The side panel shows the card's details with a
-way to where the thing lives: a creative's picture, style and prompt; a post's text, status, channel and the pack it was written from;
+came from it, however many steps away (`chain` in `packages/core/src/map/domain.ts`). The page's sidebar, where the other pages keep their lists, shows the card's details
+with a way to where the thing lives, so the board has the page's whole width: a creative's picture, style and prompt; a post's text, status, channel and the pack it was written from;
 the pack's files; a result's numbers and what its verdict means.
 
 The pack a post was written from is the pack as it stood when the entry was created: of each file the newest version written by

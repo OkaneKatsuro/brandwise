@@ -2,7 +2,7 @@
 // shows: code places the cards in columns, nothing is dragged, connected or run. What is on the map and which links are edges is
 // decided in packages/core/src/map; this file places the cards, draws them and shows the details of the selected one.
 import "@xyflow/react/dist/style.css";
-import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import { Controls, Handle, Position, ReactFlow, ReactFlowProvider, useViewport, type Edge, type Node, type NodeProps, type OnInit } from "@xyflow/react";
 import { useBbNavigate, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
@@ -45,8 +45,8 @@ const CARD_W = 208, COLUMN_GAP = 72, ROW_GAP = 12, HINT_H = 112, MARGIN = 24;
 const CARD_H: Record<Column, number> = { source: 60, pack: 80, campaign: 80, creative: 68, post: 68, result: 68 };
 const BOARD_W = COLUMNS.length * CARD_W + (COLUMNS.length - 1) * COLUMN_GAP;
 const MIN_ZOOM = 0.2;
-/** The first look is never smaller than this, so that the cards can be read; columns that do not fit are a scroll to the right. */
-const FIRST_LOOK_MIN_ZOOM = 0.7;
+/** The first look is never smaller than this, so that the cards can be read; in a narrow window the last columns are a scroll to the right. */
+const FIRST_LOOK_MIN_ZOOM = 0.6;
 const columnX = (column: Column) => COLUMNS.indexOf(column) * (CARD_W + COLUMN_GAP);
 const rowY = (column: Column, row: number) => row * (CARD_H[column] + ROW_GAP);
 
@@ -373,7 +373,7 @@ function PostDetails({ node, campaign }: { node: NodeOf<"post">; campaign: strin
   );
 }
 
-/** The selected card in the side panel: what it is, what the map knows about it, and a way to where it lives. */
+/** The selected card in the page's sidebar: what it is, what the map knows about it, and a way to where it lives. */
 function Details({ node, map, onClose }: { node: MapNodeView; map: CompanyMapView; onClose: () => void }) {
   const nav = useBbNavigate();
   const campaignName = (id: string) => map.nodes.find((n): n is NodeOf<"campaign"> => n.column === "campaign" && n.campaignId === id)?.name ?? id;
@@ -461,7 +461,26 @@ function Details({ node, map, onClose }: { node: MapNodeView; map: CompanyMapVie
   );
 }
 
-// --- the page ---
+// --- state shared by the page and its sidebar (two separate React trees in bb's slots) ---
+
+/** What the sidebar shows of the page: the map that is drawn and the card that is selected on it. */
+type Shared = { map: CompanyMapView | null; selectedId: string | null };
+let shared: Shared = { map: null, selectedId: null };
+const listeners = new Set<() => void>();
+function setShared(patch: Partial<Shared>) {
+  shared = { ...shared, ...patch };
+  listeners.forEach((l) => l());
+}
+const subscribe = (l: () => void) => {
+  listeners.add(l);
+  return () => {
+    listeners.delete(l);
+  };
+};
+const useShared = () => useSyncExternalStore(subscribe, () => shared);
+const select = (selectedId: string | null) => setShared({ selectedId });
+
+// --- the page and its sidebar ---
 
 const Placeholder = ({ children }: { children: ReactNode }) => (
   <div role="status" className="m-4 flex flex-1 items-center justify-center rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">{children}</div>
@@ -472,8 +491,7 @@ export function MapPage({ subPath }: PluginNavPanelProps) {
   const rpc = useRpc<typeof rpcContract>();
   const nav = useBbNavigate();
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
-  const [map, setMap] = useState<CompanyMapView | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { map, selectedId } = useShared();
   const [error, setError] = useState<string | null>(null);
   const report = useCallback((cause: unknown) => setError(message(cause)), []);
   const routeId = decodeURIComponent(subPath.split("/")[0]);
@@ -495,13 +513,12 @@ export function MapPage({ subPath }: PluginNavPanelProps) {
     if (routeId === "") return;
     rpc.call("map_company", { campaignId: routeId }).then((m) => {
       if (wanted.current !== routeId) return;
-      setMap(m);
+      setShared({ map: m });
       setError(null);
     }, report);
   }, [rpc, routeId, report]);
   useEffect(() => {
-    setMap(null);
-    setSelectedId(null);
+    setShared({ map: null, selectedId: null });
     setError(null);
     refetch();
   }, [refetch]);
@@ -532,21 +549,29 @@ export function MapPage({ subPath }: PluginNavPanelProps) {
           <span>No company yet. Add an always-on base on the Campaigns page, or run <code>bb brandwise campaign add "&lt;name&gt;" --kind always_on</code>: the map shows one company at a time.</span>
         </Placeholder>
       ) : map === null ? null : (
-        <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Board key={map.rootId} map={map} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
-          </div>
-          {/* always there, so the board keeps its width and a selection never pushes a column out of sight */}
-          <aside aria-label="Details" className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border p-4">
-            {selected === null ? (
-              <>
-                <p className="text-sm text-muted-foreground">Click a card to see its details. Its chain lights up: everything it came from, back to the sites the pack was read from, and everything that came from it.</p>
-                <Note>A dashed line links two cards of one column: a campaign under another, a creative derived from another. Scroll to move around; pinch, or use the buttons, to zoom.</Note>
-              </>
-            ) : <Details node={selected} map={map} onClose={() => setSelectedId(null)} />}
-          </aside>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <Board key={map.rootId} map={map} selectedId={selected?.id ?? null} onSelect={select} />
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The details of the selected card, in the page's sidebar: there the board keeps the page's whole width, so all six columns are in
+ * sight, and a selection never pushes one out.
+ */
+export function MapSidebar() {
+  const { map, selectedId } = useShared();
+  const selected = map?.nodes.find((n) => n.id === selectedId) ?? null;
+  return (
+    <aside aria-label="Details" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 py-3">
+      {map === null || selected === null ? (
+        <>
+          <p className="text-sm text-muted-foreground">Click a card to see its details. Its chain lights up: everything it came from, back to the sites the pack was read from, and everything that came from it.</p>
+          <Note>A dashed line links two cards of one column: a campaign under another, a creative derived from another. Scroll to move around; pinch, or use the buttons, to zoom.</Note>
+        </>
+      ) : <Details node={selected} map={map} onClose={() => select(null)} />}
+    </aside>
   );
 }
