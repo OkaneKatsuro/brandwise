@@ -196,8 +196,20 @@ test("readFolder: files with their size, folders, and links as links that are ne
       { path: "styles/card/style.json", kind: "file", bytes: 2, text: "{}" },
       { path: "styles/poster", kind: "link", bytes: 0 },
     ]);
-    await assert.rejects(readFolder(join(root, "nowhere")), /No folder at .*nowhere: give the folder that holds the pack's pack\.json/);
-    await assert.rejects(readFolder(join(dir, "pack.json")), /No folder at .*pack\.json/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readFolder: a folder without a pack.json is not a pack's and is not read: nothing it holds is named", async () => {
+  const root = mkdtempSync(join(tmpdir(), "bw-folder-"));
+  try {
+    mkdirSync(join(root, "keys"));
+    writeFileSync(join(root, "keys", "id_ed25519"), "secret");
+    writeFileSync(join(root, "keys", "style.json"), "{ secret");
+    for (const dir of [join(root, "keys"), join(root, "nowhere"), join(root, "keys", "style.json")]) {
+      await assert.rejects(readFolder(dir), (e: Error) => e.message === `No pack.json in ${dir}: give the folder that holds the pack's pack.json`, dir);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -207,7 +219,8 @@ test("readFolder: a folder with more than a thousand files and folders is not a 
   const dir = mkdtempSync(join(tmpdir(), "bw-folder-"));
   try {
     mkdirSync(join(dir, "styles"));
-    for (let i = 0; i < 1000; i++) writeFileSync(join(dir, "styles", `${i}.json`), "{}");
+    writeFileSync(join(dir, "pack.json"), "{}");
+    for (let i = 0; i < 999; i++) writeFileSync(join(dir, "styles", `${i}.json`), "{}");
     await assert.rejects(readFolder(dir), /holds more than 1000 files and folders: that is not a style pack/);
     rmSync(join(dir, "styles", "0.json"));
     assert.equal((await readFolder(dir)).length, 1000);
@@ -277,11 +290,18 @@ test("fetchRepository: git is held to https, and the temporary folder is gone wh
   const before = process.env.TMPDIR;
   process.env.TMPDIR = root; // where the function makes its temporary folder, so that it can be seen to be gone
   try {
-    await assert.rejects(fetchRepository(`file://${root}`), /^Error: Could not fetch file:\/\/.*: fatal: transport 'file' not allowed\. A pack's repository is fetched over https without signing in: check the address and that the repository is public\.$/);
+    // an address of the range kept for examples: public as far as the check goes, and git refuses the protocol before it connects
+    await assert.rejects(fetchRepository("http://192.0.2.1/extras.git"), /^Error: Could not fetch http:\/\/192\.0\.2\.1\/extras\.git: fatal: transport 'http' not allowed\. A pack's repository is fetched over https without signing in: check the address and that the repository is public\.$/);
     assert.deepEqual(readdirSync(root), []);
   } finally {
     if (before === undefined) delete process.env.TMPDIR;
     else process.env.TMPDIR = before;
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fetchRepository: this machine and hosts of a private network are refused before git runs: a pack is fetched from a public host only", async () => {
+  for (const address of ["https://localhost/acme/extras.git", "https://127.0.0.1:8443/extras", "https://[::1]/extras", "https://10.0.0.5/extras", "https://192.168.1.10/extras", "https://169.254.169.254/latest"]) {
+    await assert.rejects(fetchRepository(address), /^Error: \S+ is this machine or a host of a private network: a pack is fetched from a public git host only\. Give the pack's public https address, or the full path of a folder that holds it\.$/, address);
   }
 });
