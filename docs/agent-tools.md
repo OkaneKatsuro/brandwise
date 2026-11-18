@@ -74,13 +74,14 @@ Status: **exists** = done in the repo, **plan** = needs to be built, **external*
 | 14 | `lint_claims` | read | 1 | deterministic check of text against `claims.md` | plan |
 | 15 | `draft_post` | draft | 1 | saves a post draft, runs lint right away | plan |
 | 16 | `draft_page` | draft | 1 | page from a template and a data row (pSEO) | plan |
-| 17 | `generate_media` | draft | 2 over budget | image or video (Higgsfield), costs credits | **exists** as `bb brandwise creative cost\|generate\|collect` (per-call and daily limit) |
+| 17 | `generate_media` | draft | 2 over budget | image or video (Higgsfield) from a prompt or from a style and its slots, costs credits | **exists** as `bb brandwise creative cost\|generate\|collect` (per-call and daily limit) |
 | 18 | `log_hypothesis` | write | 1 | writes a hypothesis to `experiments` | plan |
 | 19 | `schedule_item` | write | 1–3 by type | creates a calendar entry | plan |
 | 20 | `reschedule_item` | write | 1–2 | changes the time or cancels an entry | plan |
 | 21 | `propose_tool` | write | 3 | proposes a new tool (status `proposed` only) | plan |
 | 22 | `get_asset` | read | 1 | asset metadata and a short-lived signed link (see `assets.md`) | plan |
 | 23 | `save_asset` | draft | 1 | saves a file to storage by hash and writes an `asset` record | plan |
+| 24 | `get_styles` | read | 1 | style recipes for creatives: what each is for, its slots, aspects and channels | **exists** as `bb brandwise style list\|show` |
 
 `schedule_item`: a draft without publishing is tier 1, publishing to an account is tier 2, claims about price, warranty or subsidies and a new channel are tier 3.
 
