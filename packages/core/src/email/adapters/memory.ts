@@ -9,7 +9,7 @@ export const memoryCapabilities: Capabilities = {
   features: ["drafts"],
 };
 
-export function memoryProvider(cfg: { id?: string; /** prefix of campaign ids: tests that share a database need ids unique to the run */ idPrefix?: string; recipient: (address: string) => Recipient; recipients?: string[] }): EmailProvider & { campaigns: Map<string, { sent: boolean; subject: string; html: string }>; outbox: EmailEvent[] } {
+export function memoryProvider(cfg: { id?: string; /** prefix of campaign ids: providers that share a database need ids of their own */ idPrefix?: string; recipient: (address: string) => Recipient; recipients?: string[] }): EmailProvider & { campaigns: Map<string, { sent: boolean; subject: string; html: string }>; outbox: EmailEvent[] } {
   const campaigns = new Map<string, { sent: boolean; subject: string; html: string }>();
   const outbox: EmailEvent[] = [];
   const id = cfg.id ?? "memory";

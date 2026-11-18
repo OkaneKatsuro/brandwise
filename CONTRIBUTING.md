@@ -37,7 +37,7 @@ cd ../../apps/bb-plugin-brandwise && npm install && npx tsc --noEmit
 
 - Branch from `main`; one topic per pull request.
 - Add or update tests. New connectors and e-mail providers must pass the shared contract tests (`packages/core/src/email/contract.ts` for e-mail).
-- Tests that touch the database clean up after themselves (use `purge` from `src/testing.ts`) and use unique names, because test files run in parallel.
+- Tests that touch the database are declared with `dbTest` from `src/testing.ts`. It skips them without the local stack and gives them a core on a Postgres schema that belongs to their test file and is dropped after it, so a test names things plainly, removes nothing and never sees the data of the running instance. The tests of one file share that schema: give them different names where they would collide.
 - Run `npx tsc --noEmit` in the plugin and `npm test` in `packages/core` before you push; CI runs both.
 - Use conventional commit messages (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`), in English. Pull request descriptions are in English too.
 - Never commit secrets, `.env` files, customer data or generated creatives. Do not commit real brand assets of a client.
