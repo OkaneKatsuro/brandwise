@@ -26,7 +26,7 @@ Each step is one small pull request. Steps 5 and 6 depend on nothing before them
 | 3 | `stack/context-3-design` | The company's look (colours, fonts, logo, image style) as part of the pack, applied to every generation by code. |
 | 4 | `stack/context-4-social` | `research social <profile>`: how the company already speaks and what it posts. |
 | 5 | `stack/styles-1-library` | Style recipes: `style list|show`, `creative generate --style`, ten built-in styles. |
-| 6 | `stack/styles-2-packs` | Style packs from a git repository and a Styles page with a gallery (the "market"). |
+| 6 | `stack/styles-2-packs`, `stack/styles-3-page` | Style packs from a folder or a git repository, switched on by a person (the "market"), and the Styles page. |
 | 7 | `stack/analytics-6-social-<platform>` | Organic post numbers per platform (already named in `analytics.md`). |
 | 8 | `stack/virality-1-rules` | Virality computed by code against the account's own baseline; results by style. |
 | 9 | `stack/map-1-read` | The Map page: a read-only board of one company, from sources to results. |
@@ -110,44 +110,47 @@ Done when: for a profile with 30 posts the audit names the three formats used mo
 A style is a recipe for one kind of creative, shared by every company. What makes the result the company's own is its pack and
 `design.json`, so a style is never copied per company.
 
-```
-apps/bb-plugin-brandwise/styles/<id>/
-  style.json       # what code reads
-  STYLE.md         # what the agent reads
-  examples/*.jpg   # optional: one to three sample outputs, shown in the gallery
-```
-
-- `style.json`: `id`, `title`, `kind` (`image | video`), `aspects`, `channels`, `slots` (what the agent fills in, for example
-  `subject`, `setting`), `prompt` (a Mustache template over the slots; Mustache is already a dependency), `models` (one per provider,
-  for example `byteplus: dreamina-seedance-2-5-260628`; a provider without an entry needs `--model`), `params`, `version`. Plain JSON,
-  so the core needs no new parser.
-- `STYLE.md`: when to use the style, what each slot should hold, the pattern of the post text that goes with it (opening line,
-  structure), and what to avoid.
+- A style is one object: `id`, `title`, `kind` (`image | video`), `aspects` (the first is the default), `channels`, `slots` (what the
+  agent fills in, each with what it should hold), `prompt` (a Mustache template over the slots; Mustache is already a dependency),
+  `models` (one per provider; a provider without an entry needs `--model`), `params`, `version`, and for the agent `use` (when it
+  fits), `copy` (the pattern of the post text that goes with it) and `avoid`. `parseStyle` in `packages/core/src/styles` is the one
+  validator of that shape.
+- The built-in styles are TypeScript modules under `packages/core/src/styles/builtin/`. They are code, not files read at run time:
+  the plugin is bundled and cannot find files beside its bundle.
 - Commands: `bb brandwise style list [--kind] [--channel]`, `style show <id>`, and
-  `creative generate --style <id> --slot subject="..."`. Code renders the template, adds the company's look (step 3) and picks the
-  model of the configured provider. The agent supplies only the slots.
-- Provenance of the asset records `style: { id, version, origin }`, which is what steps 8 and 9 read.
-- Styles are folders shaped like skills, but they are not registered as bb skills: dozens of them would fill every thread's skill
-  list. One skill, `creative-styles`, tells the agent how to choose (goal, channel, what worked: `metrics styles`), to fill slots from
-  the pack, and to propose a new style when none fits instead of editing a template in place.
-- First set, chosen for startup founders: product hero shot, product screen showcase, launch announcement, feature card, changelog
-  post, build-in-public update, founder talking to camera, customer quote, before and after, meme.
+  `creative generate --style <id> --slot subject="..."` (also `creative cost`). Code renders the template and picks the model of the
+  configured provider; the agent supplies only the slots. `--style` with `--prompt` is refused. Step 3 adds the company's look.
+- Provenance of the asset records `style: { id, version, origin }`, which is what steps 8 and 9 read. A test pins every built-in
+  recipe to its version, so a recipe cannot change without a new version.
+- Styles are not registered as bb skills: dozens of them would fill every thread's skill list. One skill, `creative-styles`, tells
+  the agent how to choose (goal, channel), to fill slots from the pack, and to propose a new style when none fits instead of editing
+  a template in place.
+- The first set, chosen for startup founders: `product-hero`, `product-screen`, `launch-announcement`, `feature-card`,
+  `changelog-post`, `build-in-public`, `founder-on-camera` (video), `customer-quote`, `before-after`, `meme`.
 
-Done when: `creative generate --style product-hero --slot subject="..."` gives an on-brand image in two companies with different
-looks, and each asset's provenance names the style.
+Done when: `creative generate --style product-hero --slot subject="..."` gives an image in two companies, and each asset's provenance
+names the style.
 
 ## Step 6: style packs (the "market")
 
-- A pack is a git repository with `pack.json` (name, author, licence) and `styles/*/STYLE.md`.
-  `bb brandwise style add <git url | folder>` copies it to `~/.bb-brandwise/styles/<pack>/`; `style update`, `style remove`.
-  Lookup order: installed packs, then built-in styles; an installed style with the same id wins.
-- A pack holds Markdown, JSON and images only; a file of any other type stops the install. A recipe becomes a prompt, so an installed
-  pack is off until a person has seen it and switched it on.
-- The Styles page: a gallery of installed and built-in styles with their examples, per-company on/off, and "Available": packs listed
-  in `styles-index.json` in this repository (a pull request adds a pack to the list).
-- No accounts, ratings or payments. The project is open source; a shared list and git are enough until outside authors exist.
+- A pack is a folder or a git repository with `pack.json` (name, author, licence) and `styles/<id>/style.json`, each in the shape of
+  step 5. `examples/style-pack/` in this repository is one, and the reference for authors.
+- `bb brandwise style add <folder | https git url>` checks the pack and stores it in Postgres, the same for every machine, like the
+  product pack: tables `style_pack` and `style_pack_style`. Nothing of a pack is kept on disk. `style packs` lists them,
+  `style remove <pack>` deletes one, adding a pack again replaces it.
+- A pack's style is addressed as `<pack>/<id>`; built-in styles keep their bare id. A pack can therefore never replace a built-in
+  style or another pack's.
+- A pack holds JSON, Markdown and images only: a file of any other type, a link, or a style that does not pass `parseStyle` stops
+  the install, and nothing of the pack is stored. From git only `https` is fetched, without submodules.
+- A recipe becomes a prompt, so a pack is off after `style add` and its styles cannot be used until a person has read them and
+  switched it on: `style enable <pack>` (a person's command, like `product confirm`; `style disable` switches it off again).
+- Step 6b, the Styles page: the styles there are, built-in and from packs, each with what `style show` says, and the switch of each
+  pack.
+- No accounts, ratings or payments, and no list of packs kept by us yet: the project is open source, a git address is enough until
+  outside authors exist.
 
-Done when: a pack from a public repository is installed with one command, switched on in the page and used by `creative generate`.
+Done when: a pack is installed with one command, is off, is switched on by a person and is then used by
+`creative generate --style <pack>/<id>`; a pack with a script in it is refused whole.
 
 ## Step 7: organic post numbers
 
