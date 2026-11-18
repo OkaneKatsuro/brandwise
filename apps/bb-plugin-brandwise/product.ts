@@ -1,48 +1,60 @@
-// Product pack of a brand: a few Markdown files per always-on campaign (what is sold, to whom, what may be claimed).
-// Agents read it with `product get`, the onboarding wizard (skills/product-onboarding) writes it with `product set`.
+// CLI of the product pack: `bb brandwise product ...`. The pack itself (versions, confirmation, the import of packs kept on disk)
+// lives in packages/core/src/context; this file parses arguments and prints. Agents read the pack with `product get`, the
+// onboarding wizard (skills/product-onboarding) writes it with `product set`, a person confirms it with `product confirm`.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { DocVersion } from "./core/context/index.ts";
 import type { Core } from "./core/index.ts";
 
-export const PACK_FILES = ["product.md", "audience.md", "claims.md", "constraints.md", "voice.md"] as const;
-const DERIVED = /^derived\/[a-z0-9-]{1,48}\.md$/;
-const MAX_BYTES = 200_000;
+type Io = { val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string; actor: (argv: string[]) => string };
 
-const root = () => process.env.BW_PRODUCT_DIR || path.join(os.homedir(), ".bb-brandwise", "product");
-const validName = (n: string) => (PACK_FILES as readonly string[]).includes(n) || DERIVED.test(n);
+/** Where packs were kept before the database held them: what `product import` reads unless --dir names another folder. */
+const PACKS_ON_DISK = path.join(os.homedir(), ".bb-brandwise", "product");
 
-/** The pack belongs to the always-on base: a campaign under it shares its base's pack. */
-async function packDir(c: Core, hint: string | undefined) {
-  const campaign = await c.campaigns.resolve(hint);
-  return path.join(root(), campaign.parentId ?? campaign.id);
-}
+/** One version on a line: its number, when and by whom it was written, and whether a person confirmed it. */
+const fmt = (v: DocVersion) =>
+  `v${String(v.version).padEnd(3)} ${v.createdAt.slice(0, 16)}  ${v.author.padEnd(16)} ${v.confirmedAt ? `confirmed ${v.confirmedAt.slice(0, 16)} by ${v.confirmedBy}` : "draft"}`;
 
-type Io = { val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string };
-
-/** `bb brandwise product get [<file>] | set <file> (--body <text> | --file <path>) | list` */
-export async function productCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage }: Io) {
-  const dir = await packDir(c, val(args, "--campaign"));
+/** `bb brandwise product list | get [<file>] | set <file> (--body <text> | --file <path>) | history <file> | confirm [<file>] | import [--dir <folder>]` */
+export async function productCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage, actor }: Io) {
+  const campaign = async () => (await c.campaigns.resolve(val(args, "--campaign"))).id;
   const [name] = positional(args.slice(2));
-  if (action === "list" || (action === "get" && !name)) {
-    const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".md")).sort() : [];
-    const missing = PACK_FILES.filter((f) => !files.includes(f));
-    return reply({ dir, files, missing }, `${dir}\nfiles: ${files.join(", ") || "none"}\nmissing: ${missing.join(", ") || "none"}`);
+  if (action === "import") {
+    const dir = val(args, "--dir") ?? PACKS_ON_DISK;
+    const done = await c.context.importDir(dir, actor(args));
+    const lines = done.packs.map((p) =>
+      `${p.campaignName}: added ${p.added.join(", ") || "nothing"}${p.kept.length ? `; already in the database: ${p.kept.join(", ")}` : ""}${p.skipped.map((s) => `\n  skipped: ${s.reason}`).join("")}`);
+    if (done.unknown.length) lines.push(`Not imported, no campaign has this id: ${done.unknown.join(", ")}`);
+    return reply({ dir, ...done }, lines.join("\n") || `No packs in ${dir}.`);
   }
-  if (!name || !validName(name)) return { exitCode: 1, stderr: `File must be one of ${PACK_FILES.join(", ")} or derived/<name>.md\n${usage}` };
-  const file = path.join(dir, name);
+  if (action === "list" || (action === "get" && !name)) {
+    const pack = await c.context.list(await campaign());
+    return reply(pack, `${pack.files.map((f) => `${f.name.padEnd(24)} ${fmt(f)}`).join("\n") || "files: none"}\nmissing: ${pack.missing.join(", ") || "none"}`);
+  }
+  if (action === "confirm") {
+    const done = await c.context.confirm(await campaign(), actor(args), name);
+    return reply(done, done.length ? `Confirmed ${done.map((v) => `${v.name} v${v.version}`).join(", ")}` : `Nothing to confirm: ${name ?? "the pack"} has no draft`);
+  }
+  if (!name) return { exitCode: 1, stderr: usage };
   if (action === "get") {
-    if (!fs.existsSync(file)) return { exitCode: 1, stderr: `${name} does not exist yet` };
-    return reply({ name, content: fs.readFileSync(file, "utf8") }, fs.readFileSync(file, "utf8"));
+    const doc = await c.context.get(await campaign(), name);
+    if (!doc) return { exitCode: 1, stderr: `${name} does not exist yet` };
+    const { body, ...version } = doc;
+    return reply({ ...version, content: body }, body);
+  }
+  if (action === "history") {
+    const versions = await c.context.history(await campaign(), name);
+    if (versions.length === 0) return { exitCode: 1, stderr: `${name} does not exist yet` };
+    return reply(versions, versions.map(fmt).join("\n"));
   }
   if (action === "set") {
     const from = val(args, "--file");
     const body = from ? fs.readFileSync(from, "utf8") : val(args, "--body");
-    if (body === undefined || body.trim() === "") return { exitCode: 1, stderr: `Give the content with --body '<text>' or --file <path>\n${usage}` };
-    if (Buffer.byteLength(body) > MAX_BYTES) return { exitCode: 1, stderr: `${name} is over ${MAX_BYTES} bytes` };
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, body.endsWith("\n") ? body : `${body}\n`);
-    return reply({ name, bytes: Buffer.byteLength(body) }, `Saved ${name} in ${dir}`);
+    if (body === undefined) return { exitCode: 1, stderr: `Give the content with --body '<text>' or --file <path>\n${usage}` };
+    const { doc, added } = await c.context.set(await campaign(), name, body, actor(args));
+    return reply({ name, bytes: Buffer.byteLength(body), version: doc.version, added },
+      added ? `Saved ${name} as version ${doc.version}, a draft until a person confirms it` : `${name} is unchanged: version ${doc.version} already has this text`);
   }
   return { exitCode: 1, stderr: usage };
 }
