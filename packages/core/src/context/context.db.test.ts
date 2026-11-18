@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 import { createCore, configFromEnv } from "../index.ts";
 import { migrate } from "../migrate.ts";
 import { purge } from "../testing.ts";
@@ -119,6 +120,36 @@ run("confirmation: the current version of one file or of all gets who and when; 
     assert.equal((await confirmedBy())["voice.md"], null, "a changed file is a draft again");
     assert.deepEqual((await context.history(base.id, "voice.md")).map((v) => [v.version, v.confirmedBy]), [[1, "cli:roman"], [2, null]], "the earlier version stays confirmed");
     assert.deepEqual((await context.confirm(base.id, "cli:roman")).map((v) => [v.name, v.version]), [["voice.md", 2]], "only the current version is confirmed");
+  } finally {
+    await purge(core, tag);
+    await core.close();
+  }
+});
+
+run("the pack as of a moment: of each file the newest version written by then, and a draft where it was confirmed only later", async () => {
+  await migrate(process.env.DATABASE_URL!);
+  const core = createCore(configFromEnv());
+  const tag = newTag("as-of");
+  try {
+    const { context } = core;
+    const base = await core.campaigns.add({ name: `${tag}-base`, kind: "always_on" });
+    const child = await core.campaigns.add({ name: `${tag}-launch`, kind: "campaign", parentId: base.id });
+    const product = (await context.set(base.id, "product.md", "A CLI for marketing.", "cli:onboarding")).doc;
+    const [confirmed] = await context.confirm(base.id, "cli:founder", "product.md");
+    const voice = (await context.set(base.id, "voice.md", "Plain.", "cli")).doc;
+    // the moments are the database's own; a pause keeps what was written before one and after it apart
+    await sleep(20);
+    const rewritten = (await context.set(base.id, "product.md", "A CLI for founders' marketing.", "cli")).doc;
+    await context.set(base.id, "audience.md", "Founders.", "cli");
+    const [voiceConfirmed] = await context.confirm(base.id, "cli:founder", "voice.md");
+
+    const then = new Date(Date.parse(rewritten.createdAt) - 1);
+    assert.deepEqual(await context.asOf(child.id, then), [confirmed, voice],
+      "just before product.md was rewritten: its first version, confirmed by then; voice.md as the draft it was; no audience.md yet");
+    assert.deepEqual([confirmed.version, confirmed.confirmedBy, voice.confirmedAt], [1, "cli:founder", null]);
+    assert.deepEqual(await context.asOf(base.id, new Date(Date.parse(product.createdAt) - 1)), [], "before anything was written the company had no pack");
+    assert.deepEqual(await context.asOf(base.id, new Date(Date.parse(voiceConfirmed.confirmedAt!) + 1000)), (await context.list(base.id)).files, "after the last change: the pack of today");
+    await assert.rejects(context.asOf(randomUUID(), then), /No campaign with id/);
   } finally {
     await purge(core, tag);
     await core.close();
