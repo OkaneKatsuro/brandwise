@@ -79,17 +79,21 @@ Done when: a founder gives one URL, answers at most ten questions, and an agent 
 For a company that already has a site, the look is documented, not designed (`brand-system.md`: "change nothing, only document it").
 The full generator for companies without an identity stays as planned there.
 
-- Code collects candidates, never the model: `research look <url>` renders the home page in the headless Chrome the e-mail preview
-  already uses and returns a screenshot (a `reference` asset), the colours of the page by where they are used (background, text,
-  main button, links), the font families of headings and body, and logo candidates (header image, icon, OpenGraph image). For an
-  uploaded logo, its dominant colours. The page's scripts are off and requests to anything but public addresses are refused.
-- Design files come in as assets: `bb brandwise assets add <file> --role brand` (brand book as PDF, exported frames, fonts). The agent
-  reads them and proposes roles for the candidates; the person confirms.
-- Result in the pack: `design.md` (palette with roles, fonts, logo rules, image style, what to avoid) and `design.json` (the same
-  values for code: `colors`, `fonts`, `imagePromptPrefix`, `brandRefs` as asset ids).
-- Applied by code: `creative generate` in a company with a confirmed `design.json` puts the prefix before the prompt and adds the brand
-  references, unless `--no-brand` is given. The asset's provenance records that it did. Later the e-mail brand kit
-  (`email_brand_kit`) can be filled from the same file.
+- Code collects candidates, never the model: `research look <url>` renders the page in headless Chrome and returns a screenshot of
+  its top (a `reference` asset), the colours of the page by where they are used (background, text, headings, links, the main button
+  and its text), the font families of headings and body, and logo candidates (the icon, the header image, the OpenGraph image). A
+  value that is not found is absent, never guessed.
+- The page is a stranger's, so Chrome is fenced as a whole: its scripts are off, and it reaches the network only through a proxy
+  that the core starts for that one render, which resolves every host itself, lets only public addresses and web ports pass and
+  connects to the address it checked.
+- Result in the pack: `design.md` (for people and agents: palette with roles, fonts, logo rules, image style, what to avoid) and
+  `design.json` (for code: `colors` by role, `fonts`, `imagePromptPrefix`), validated when it is set. The agent proposes both from
+  the candidates and the screenshot; a person confirms them like every pack file.
+- Applied by code: `creative generate` and `creative cost` in a company with a confirmed `design.json` put the prefix and the
+  palette, as one sentence, in front of the prompt, with a style or without one, unless `--no-brand` is given. The asset's
+  provenance records which version of the look it carries.
+- Later: brand reference images in generations, the dominant colours of an uploaded logo, design files read as assets, and filling
+  the e-mail brand kit (`email_brand_kit`) from the same file.
 
 Done when: two creatives generated a week apart by different threads share colours and image style without either prompt naming them.
 
