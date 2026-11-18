@@ -4,7 +4,7 @@ import type pg from "pg";
 import type { MetricsSource, Snapshot } from "../metrics/domain.ts";
 import { codeOf, isBot, MAX_VISITORS_PER_SOURCE, newLinkId, sourceOf, verifyCode, visitorOf } from "./domain.ts";
 
-export { clientAddress, isBot, rateLimiter, REDIRECT_LIMIT, replaceUrls } from "./domain.ts";
+export { clientAddress, isBot, redirectLimiter, REDIRECT_LIMIT, replaceUrls } from "./domain.ts";
 
 export function createLinks(deps: {
   pool: pg.Pool;
@@ -28,14 +28,17 @@ export function createLinks(deps: {
         [newLinkId(), entryId, url]))[0].id as string;
       return shortUrl(id) ?? url;
     },
-    /** Where a code leads, recording the request (a preview or crawler as a bot); null for a code we did not issue. */
-    async resolve(code: string, req: { method: string; userAgent: string | null; ip: string | null }): Promise<string | null> {
+    /**
+     * Where a code leads; null for a code we did not issue. The request is recorded as a click (a preview or crawler as a bot),
+     * unless it is null: a request over the redirect's shared allowance is sent on without a row.
+     */
+    async resolve(code: string, req: { method: string; userAgent: string | null; ip: string | null } | null): Promise<string | null> {
       const id = verifyCode(deps.key, code);
       if (!id) return null;
       const row = (await q("select url from short_link where id = $1", [id]))[0];
       if (!row) return null;
       // the visitor goes on even when the click cannot be recorded (a database in recovery): a lost count beats a broken link
-      await q("insert into link_click (link_id, visitor, source, bot) values ($1,$2,$3,$4)", [id, visitorOf(deps.key, req.ip, req.userAgent), sourceOf(deps.key, req.ip), isBot(req.method, req.userAgent)])
+      if (req) await q("insert into link_click (link_id, visitor, source, bot) values ($1,$2,$3,$4)", [id, visitorOf(deps.key, req.ip, req.userAgent), sourceOf(deps.key, req.ip), isBot(req.method, req.userAgent)])
         .catch((err) => { console.error(`short link ${id}: click not recorded: ${err instanceof Error ? err.message : String(err)}`); });
       return row.url as string;
     },

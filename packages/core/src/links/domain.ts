@@ -55,29 +55,36 @@ export function clientAddress(forwardedFor: string | null | undefined): string |
 /** The redirect's request limit: per address and for all requests without one, each minute, over at most this many addresses. */
 export const REDIRECT_LIMIT = { windowMs: 60_000, perKey: 120, shared: 600, maxKeys: 10_000 } as const;
 
+/** What the redirect does with a request: send it on and record the click, send it on unrecorded, or refuse it. */
+export type RedirectVerdict = "count" | "skip" | "refuse";
+
 /**
- * A request limit per key in fixed windows, with bounded memory: `limited(key, now)` counts the request and says whether it is over.
- * A key gets `perKey` requests a window; requests without a key share `shared`. At most `maxKeys` keys are followed at a time: once
- * that many are active, a new key is counted with the shared ones, so sending from many addresses buys no extra requests and the
- * table cannot grow. In memory and per process, so a restart resets it; a plugin running in several processes needs a shared store.
+ * The redirect's request limit, in fixed windows and with bounded memory: `verdict(address, now)` counts the request and says what
+ * to do with it.
+ * - An address is refused past `perKey` requests a window. Only that sender is affected.
+ * - At most `maxKeys` addresses are followed at a time. Requests without an address, and new addresses while the table is full,
+ *   are counted together; past `shared` they are sent on unrecorded and never refused, because real visitors are among them and a
+ *   lost count beats a broken link. Sending from many addresses can therefore hide clicks for a window, but it cannot break links,
+ *   fill the click table or grow this one.
+ * In memory and per process, so a restart resets it; a plugin running in several processes needs a shared store.
  */
-export function rateLimiter(opts: { windowMs: number; perKey: number; shared: number; maxKeys: number }): (key: string | null, now: number) => boolean {
+export function redirectLimiter(opts: { windowMs: number; perKey: number; shared: number; maxKeys: number }): (address: string | null, now: number) => RedirectVerdict {
   type Window = { n: number; reset: number };
-  const keys = new Map<string, Window>();
+  const followed = new Map<string, Window>();
   let shared: Window = { n: 0, reset: 0 }, sweepAt = 0;
   const count = (w: Window | undefined, now: number): Window => (w && w.reset > now ? { n: w.n + 1, reset: w.reset } : { n: 1, reset: now + opts.windowMs });
-  return (key, now) => {
+  return (address, now) => {
     if (now >= sweepAt) { // once a window, so a full table is not walked on every request
-      for (const [k, w] of keys) if (w.reset <= now) keys.delete(k);
+      for (const [k, w] of followed) if (w.reset <= now) followed.delete(k);
       sweepAt = now + opts.windowMs;
     }
-    if (key !== null && (keys.has(key) || keys.size < opts.maxKeys)) {
-      const w = count(keys.get(key), now);
-      keys.set(key, w);
-      return w.n > opts.perKey;
+    if (address !== null && (followed.has(address) || followed.size < opts.maxKeys)) {
+      const w = count(followed.get(address), now);
+      followed.set(address, w);
+      return w.n > opts.perKey ? "refuse" : "count";
     }
     shared = count(shared, now);
-    return shared.n > opts.shared;
+    return shared.n > opts.shared ? "skip" : "count";
   };
 }
 

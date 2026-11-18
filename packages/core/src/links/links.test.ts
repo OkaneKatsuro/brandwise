@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { telegram } from "../connector-telegram.ts";
 import type { PublishInput } from "../publish.ts";
-import { clientAddress, codeOf, isBot, newLinkId, rateLimiter, replaceUrls, verifyCode } from "./domain.ts";
+import { clientAddress, codeOf, isBot, newLinkId, redirectLimiter, replaceUrls, verifyCode } from "./domain.ts";
 import { createLinks } from "./index.ts";
 
 const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
@@ -43,15 +43,23 @@ test("an IPv6 client is its /64, whichever address of it the request used", () =
   assert.equal(clientAddress("2001:db8::"), "2001:db8:0:0::/64");
 });
 
-test("request limit: per key and window, the rest shared, and never more keys than the cap", () => {
-  const limited = rateLimiter({ windowMs: 1000, perKey: 2, shared: 3, maxKeys: 2 });
-  assert.deepEqual([limited("a", 0), limited("a", 1), limited("a", 2)], [false, false, true], "the third request of a key in one window");
-  assert.equal(limited("b", 3), false, "another key has its own count");
-  assert.deepEqual([limited(null, 4), limited("c", 5), limited("d", 6), limited("e", 7)], [false, false, false, true],
-    "with the table full, new keys are counted with the requests that have no key: the fourth of them is over");
-  assert.equal(limited("b", 8), false, "a key already followed keeps its own count");
-  assert.deepEqual([limited("c", 2000), limited("c", 2001), limited("c", 2002)], [false, false, true],
-    "once the old windows are over the table has room again: a key that had to share now has its own count");
+test("redirect limit: a sender over its allowance is refused; over the shared allowance clicks stop being recorded, links keep working", () => {
+  const verdict = redirectLimiter({ windowMs: 1000, perKey: 2, shared: 3, maxKeys: 2 });
+  assert.deepEqual([verdict("a", 0), verdict("a", 1), verdict("a", 2)], ["count", "count", "refuse"], "the third request of an address in one window");
+  assert.equal(verdict("b", 3), "count", "another address has its own count");
+  assert.deepEqual([verdict(null, 4), verdict("c", 5), verdict("d", 6), verdict("e", 7)], ["count", "count", "count", "skip"],
+    "with the table full, new addresses are counted with the requests that have none: the fourth is sent on unrecorded, not refused");
+  assert.equal(verdict("b", 8), "count", "an address already followed keeps its own count");
+  assert.deepEqual([verdict("c", 2000), verdict("c", 2001), verdict("c", 2002)], ["count", "count", "refuse"],
+    "once the old windows are over the table has room again: an address that had to share now has its own count");
+});
+
+test("resolve: a request that is not to be recorded is sent on without a click row", async () => {
+  const sent: string[] = [];
+  const pool = { query: async (sql: string) => { sent.push(sql); return { rows: [{ url: "https://shop.example/" }] }; } } as unknown as import("pg").Pool;
+  const links = createLinks({ pool, key: "key", baseUrl: () => "https://go.example/l", channels: ["telegram"] });
+  assert.equal(await links.resolve(codeOf("key", newLinkId()), null), "https://shop.example/");
+  assert.ok(sent.every((sql) => !sql.startsWith("insert")), "no row was written");
 });
 
 test("replaceUrls keeps sentence punctuation outside the link", async () => {
