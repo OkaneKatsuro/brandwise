@@ -32,8 +32,8 @@ const packFrom = (r: any): InstalledPack => ({
 /** A pack's text as one number: its own words about itself and every style. What a review shows is what this stands for. */
 const digestOf = (pack: { name: string; author: string; licence: string; styles: Style[] }) =>
   createHash("sha256").update(JSON.stringify([pack.name, pack.author, pack.licence, pack.styles])).digest("hex");
-/** How much of a digest a person has to give: enough that no other text of the pack could share it by chance. */
-const DIGEST_GIVEN = /^[0-9a-f]{12,64}$/;
+/** A digest is given whole. A part of it is cheap to match: whoever writes a pack can make two texts that share a beginning. */
+const DIGEST = /^[0-9a-f]{64}$/;
 /** A pack's style as the library hands it out: under its address, so that it can never stand in for a built-in style or another pack's. */
 const addressed = (pack: string, body: Style): Style => ({ ...body, id: `${pack}/${body.id}` });
 
@@ -139,15 +139,15 @@ export function createStyles(deps: { pool: pg.Pool; fetch: Fetch }) {
     },
     /**
      * A person switches a pack on after reading its styles: from then on they are listed and can be used. `digest` is the one the
-     * review showed (its first 12 characters are enough). It ties the switch to the text that was read: a pack that was added
+     * review showed, whole. It ties the switch to the text that was read: a pack that was added
      * again in between has another digest and stays off. `actor` is a label, as for the confirmation of the product pack, not a
      * verified identity: that agents never switch a pack on is a rule of their skills.
      */
     async enablePack(name: string, actor: string, digest: string): Promise<InstalledPack> {
-      if (!DIGEST_GIVEN.test(digest)) throw new Error(`Give the digest that bb brandwise style review ${name} shows, 12 characters of it or more: it says which text of the pack you read`);
-      await q("update style_pack set enabled_at = now(), enabled_by = $2 where name = $1 and enabled_at is null and left(digest, length($3)) = $3", [name, actor, digest]);
+      if (!DIGEST.test(digest)) throw new Error(`Give the whole digest that bb brandwise style review ${name} shows, all 64 characters: it says which text of the pack you read`);
+      await q("update style_pack set enabled_at = now(), enabled_by = $2 where name = $1 and enabled_at is null and digest = $3", [name, actor, digest]);
       const pack = await packNamed(name);
-      if (!pack.digest.startsWith(digest)) throw new Error(`Pack "${name}" is not the text with digest ${digest}: it was added again since you read it, and it stays ${pack.enabledAt ? "as it is" : "off"}. Read it again: bb brandwise style review ${name}`);
+      if (pack.digest !== digest) throw new Error(`Pack "${name}" is not the text with digest ${digest}: it was added again since you read it, and it stays ${pack.enabledAt ? "as it is" : "off"}. Read it again: bb brandwise style review ${name}`);
       return pack;
     },
     /** Switch a pack off: its styles are no longer listed and cannot be used; assets made in them keep their record. */

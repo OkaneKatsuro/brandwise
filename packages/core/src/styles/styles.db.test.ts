@@ -170,10 +170,12 @@ run("a pack is switched on by the digest of the text that was read: a review sho
   assert.equal((await styles.review(name)).pack.enabledAt, null);
   assert.deepEqual(await listed(core, name), []);
 
-  await assert.rejects(styles.enablePack(name, "cli:roman", "abc"), /Give the digest that bb brandwise style review .* shows, 12 characters of it or more/);
   const now = await digestOf(styles, name);
   assert.notEqual(now, read.pack.digest, "other text, another digest");
-  assert.equal((await styles.enablePack(name, "cli:roman", now.slice(0, 12))).enabledBy, "cli:roman", "the first 12 characters of the digest are enough");
+  // a part of a digest is cheap to match by whoever writes the pack, so only the whole one counts
+  await assert.rejects(styles.enablePack(name, "cli:roman", now.slice(0, 32)), /Give the whole digest that bb brandwise style review .* shows, all 64 characters/);
+  assert.equal((await styles.review(name)).pack.enabledAt, null);
+  assert.equal((await styles.enablePack(name, "cli:roman", now)).enabledBy, "cli:roman");
   await assert.rejects(styles.enablePack(name, "cli:dana", read.pack.digest), /it stays as it is/, "a pack that is on is not touched by a digest that is not its own");
 }));
 
@@ -232,7 +234,7 @@ run("remove deletes the pack and its styles; a pack that is not there cannot be 
   await assert.rejects(styles.byId(`${name}/${TABLE}`), /there is no style pack/);
   const missing = new RegExp(`No style pack "${name}"\\. bb brandwise style packs lists the packs there are\\.`);
   await assert.rejects(styles.removePack(name), missing);
-  await assert.rejects(styles.enablePack(name, "cli", "0".repeat(12)), missing);
+  await assert.rejects(styles.enablePack(name, "cli", "0".repeat(64)), missing);
   await assert.rejects(styles.disablePack(name), missing);
 }));
 

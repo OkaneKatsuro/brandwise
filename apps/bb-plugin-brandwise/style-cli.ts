@@ -29,8 +29,6 @@ const describe = (s: Style) => {
   ].join("\n");
 };
 
-/** As much of a pack's digest as a person has to type to switch it on. */
-const shortDigest = (p: InstalledPack) => p.digest.slice(0, 12);
 /** Where a pack came from: the folder, or the repository and the commit that was stored. */
 const origin = (p: InstalledPack) => `${p.source}${p.revision ? ` at commit ${p.revision.slice(0, 12)}` : ""}`;
 
@@ -40,7 +38,8 @@ const origin = (p: InstalledPack) => `${p.source}${p.revision ? ` at commit ${p.
  */
 const packLines = (p: InstalledPack) => [
   `${p.name}  ${p.enabledAt ? `on since ${p.enabledAt.slice(0, 16)} by ${p.enabledBy}` : "off"}`,
-  `    by ${JSON.stringify(p.author)}, licence ${JSON.stringify(p.licence)}; from ${origin(p)}, added ${p.installedAt.slice(0, 16)} by ${p.installedBy}, digest ${shortDigest(p)}`,
+  `    by ${JSON.stringify(p.author)}, licence ${JSON.stringify(p.licence)}; from ${origin(p)}, added ${p.installedAt.slice(0, 16)} by ${p.installedBy}`,
+  `    digest ${p.digest}`,
   `    ${p.styles.join(", ")}`,
 ].join("\n");
 
@@ -67,7 +66,7 @@ export async function styleCli(c: Core, action: string | undefined, args: string
   }
   if (action === "review") {
     const { pack, styles } = await c.styles.review(name);
-    const next = pack.enabledAt ? "" : `\n\nThis is the text that would become prompts. If it is what you want, switch on exactly this text: bb brandwise style enable ${pack.name} --digest ${shortDigest(pack)}`;
+    const next = pack.enabledAt ? "" : `\n\nThis is the text that would become prompts. If it is what you want, switch on exactly this text: bb brandwise style enable ${pack.name} --digest ${pack.digest}`;
     return reply({ pack, styles }, `${packLines(pack)}\n\n${styles.map(describe).join("\n\n")}${next}`);
   }
   if (action === "enable") {
