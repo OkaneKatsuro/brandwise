@@ -82,6 +82,7 @@ Status: **exists** = done in the repo, **plan** = needs to be built, **external*
 | 22 | `get_asset` | read | 1 | asset metadata and a short-lived signed link (see `assets.md`) | plan |
 | 23 | `save_asset` | draft | 1 | saves a file to storage by hash and writes an `asset` record | plan |
 | 24 | `get_styles` | read | 1 | style recipes for creatives: what each is for, its slots, aspects and channels | **exists** as `bb brandwise style list\|show` |
+| 25 | `research_site` | draft | 1 | reads a company's public site (plain HTML, public addresses only, `robots.txt` honoured, no browser), keeps each page as a `reference` asset and returns a bounded digest of quoted material to draft the product pack from | **exists** as `bb brandwise research site` (see `context-styles-map.md`, step 2) |
 
 `schedule_item`: a draft without publishing is tier 1, publishing to an account is tier 2, claims about price, warranty or subsidies and a new channel are tier 3.
 

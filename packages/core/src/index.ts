@@ -7,6 +7,7 @@ import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectComm
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import pg from "pg";
 import { createContext } from "./context/index.ts";
+import { nodeNet } from "./context/research.ts";
 import { createSettings, type Scope, type SettingValue } from "./settings.ts";
 import { SETTING_FIELDS, providerById, type ProviderConfig } from "./providers/index.ts";
 
@@ -55,7 +56,7 @@ export type Asset = { id: string; campaignId: string; name: string; kind: string
 
 const MIME: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
-  ".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".pdf": "application/pdf", ".woff": "font/woff", ".ttf": "font/ttf",
+  ".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".pdf": "application/pdf", ".md": "text/markdown", ".woff": "font/woff", ".ttf": "font/ttf",
 };
 const kindOf = (mime: string) =>
   mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : mime.startsWith("font/") ? "font" : "document";
@@ -449,8 +450,9 @@ export function createCore(cfg: CoreConfig) {
     },
   };
 
-  // The company's context: the pack of an always-on base as versioned Markdown files (docs/context-styles-map.md, step 1).
-  const context = createContext({ pool });
+  // The company's context: the pack of an always-on base as versioned Markdown files, and the sites it was drawn from
+  // (docs/context-styles-map.md, steps 1 and 2).
+  const context = createContext({ pool, saveAsset: assets.save, net: nodeNet });
 
   return { campaigns, calendar, publishing, channels, assets, settings, generation, context, pool, close: async () => { await pool.end(); s3.destroy(); } };
 }

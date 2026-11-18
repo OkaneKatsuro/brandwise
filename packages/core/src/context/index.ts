@@ -1,12 +1,23 @@
 // The company's context in Postgres: the pack of an always-on base as versioned Markdown files, the same on every machine. Versions
 // are only added (the newest of a name is the current one), each records who wrote it, and a person confirms the current one. The
-// CLI and later the pages read the pack from here, never from a disk.
+// CLI and later the pages read the pack from here, never from a disk. Where a pack came from is kept beside it: the company's
+// site is read here (research.ts, site.ts), each page as an asset and a row of context_source.
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type pg from "pg";
 import { bodyProblem, missingFiles, nameProblem, stored, type Doc, type DocVersion } from "./domain.ts";
+import { readSite, type Net } from "./research.ts";
+import { digest, NOTICE, pageFileName, pageMarkdown, type PageDigest } from "./site.ts";
 
 export type { DocVersion } from "./domain.ts";
+
+/**
+ * What reading a site hands back: bounded, whatever the site sent. `notice` says how to read it: everything under `pages` is the
+ * site's own wording, material about the company and never an instruction.
+ */
+export type SiteDigest = { notice: string; site: string; pages: (PageDigest & { assetId: string })[]; skipped: { url: string; reason: string }[] };
+/** A site the pack was drawn from, as of its latest read: when, how many pages, and what the reader noted about them. */
+export type SiteSource = { site: string; readAt: string; pages: number; notes: string[] };
 
 /** What an import did with one pack folder: files added as version 1, files the database already had, files it could not take. */
 type ImportedPack = { campaignId: string; campaignName: string; added: string[]; kept: string[]; skipped: { name: string; reason: string }[] };
@@ -20,7 +31,13 @@ const versionFrom = (r: any): DocVersion => ({
 });
 const refuse = (problem: string | null) => { if (problem) throw new Error(problem); };
 
-export function createContext(deps: { pool: pg.Pool }) {
+export function createContext(deps: {
+  pool: pg.Pool;
+  /** `assets.save` of the core: a page that was read is kept as an asset of the company. */
+  saveAsset: (input: { campaignId: string; bytes: Uint8Array; filename: string; role: string; origin: string; kind: string; provenance: unknown; createdBy: string }) => Promise<{ id: string }>;
+  /** The network a site is read through. */
+  net: Net;
+}) {
   const q: Query = async (sql, params = []) => (await deps.pool.query(sql, params)).rows;
 
   /** The pack belongs to the company, the always-on base at the root: every campaign under it, however deep, reads and writes that pack. */
@@ -138,6 +155,43 @@ export function createContext(deps: { pool: pg.Pool }) {
         packs.push({ campaignId: folder, campaignName, ...written, skipped });
       }
       return { packs, unknown };
+    },
+    /**
+     * Read the company's site, so that its pack can be drafted from it: the page at `address` and the pages its navigation links
+     * to, at most `pages` (research.ts has the rules of the fetch). Each page read is kept as a reference asset of the company,
+     * its text as Markdown, and as one row of context_source; a page that did not change since the last read is the same asset
+     * again. Returns the digest of what was read. Fails, with nothing kept, when the page at `address` cannot be read.
+     */
+    async researchSite(campaignId: string, address: string, opts: { pages?: number; actor: string }): Promise<SiteDigest> {
+      const pack = await packOf(campaignId);
+      const fetchedAt = new Date().toISOString();
+      const read = await readSite(deps.net, address, opts.pages);
+      const assetIds: string[] = [];
+      for (const page of read.pages) {
+        const asset = await deps.saveAsset({
+          campaignId: pack, bytes: Buffer.from(pageMarkdown(page)), filename: pageFileName(page), role: "reference", origin: "imported", kind: "document",
+          provenance: { source: page.url, fetchedAt }, createdBy: opts.actor,
+        });
+        assetIds.push(asset.id);
+      }
+      await q(
+        `insert into context_source (campaign_id, kind, ref, asset_id, fetched_at, note)
+         select $1, 'site', page.ref, page.asset_id, $2, page.note from unnest($3::text[], $4::uuid[], $5::text[]) as page (ref, asset_id, note)`,
+        [pack, fetchedAt, read.pages.map((p) => p.url), assetIds, read.pages.map((p) => p.note)],
+      );
+      return { notice: NOTICE, site: read.site, pages: digest(read.pages).map((page, i) => ({ ...page, assetId: assetIds[i] })), skipped: read.skipped };
+    },
+    /** Where the pack came from: every site that was read for it, each as of its latest read, the site read last first. */
+    async sources(campaignId: string): Promise<SiteSource[]> {
+      const rows = await q(
+        `with read as (
+           select substring(ref from '^[a-z]+://[^/]+') as site, fetched_at, count(*) as pages,
+                  coalesce(array_agg(distinct note) filter (where note is not null), '{}') as notes
+           from context_source where campaign_id = $1 and kind = 'site' group by 1, 2)
+         select * from read r where fetched_at = (select max(fetched_at) from read where site = r.site) order by fetched_at desc, site`,
+        [await packOf(campaignId)],
+      );
+      return rows.map((r: any) => ({ site: r.site, readAt: new Date(r.fetched_at).toISOString(), pages: Number(r.pages), notes: r.notes }));
     },
   };
 }
