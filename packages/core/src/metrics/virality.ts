@@ -8,7 +8,7 @@ const HOUR = 3_600_000;
 export const AGES = { "1h": HOUR, "24h": 24 * HOUR, "7d": 7 * 24 * HOUR } as const;
 export type Age = keyof typeof AGES;
 /** The verdict is taken at this age: the earlier one is an early signal, the later one shows where the entry settled. */
-const VERDICT_AGE: Age = "24h";
+export const VERDICT_AGE: Age = "24h";
 /** A baseline is the median over at most this many earlier entries. */
 const BASELINE_ENTRIES = 20;
 /** With fewer earlier entries than this that have the number there is no baseline: three posts do not say what is usual. */
@@ -20,7 +20,21 @@ const BELOW_RATIO = 0.67;
 /** The style of an entry whose creative was not made from a style, or that has no creative. */
 export const NO_STYLE = "none";
 
-type Verdict = "viral" | "above" | "typical" | "below" | "unknown";
+export const VERDICTS = ["viral", "above", "typical", "below", "unknown"] as const;
+export type Verdict = (typeof VERDICTS)[number];
+/**
+ * What each verdict says, for a person who reads one: the rule as a sentence, with the numbers the rule itself uses. The viral ratio
+ * is the company's setting, so it is named, not quoted.
+ */
+export const VERDICT_MEANING: Record<Verdict, string> = {
+  viral: `Seen far more than usual and passed on: ${VERDICT_AGE} after it went out its views were at least the company's viral ratio times the usual, and it was shared at least as often as the account's posts usually are.`,
+  above: `Seen more than usual: ${VERDICT_AGE} after it went out its views were at least ${ABOVE_RATIO} times the usual.`,
+  typical: `Seen about as much as usual: ${VERDICT_AGE} after it went out its views were between ${BELOW_RATIO} and ${ABOVE_RATIO} times the usual.`,
+  below: `Seen less than usual: ${VERDICT_AGE} after it went out its views were under ${BELOW_RATIO} times the usual.`,
+  unknown: `Not judged: the post is younger than ${VERDICT_AGE}, its views are not measured, or fewer than ${MIN_BASELINE_ENTRIES} earlier posts on its channel have views to compare with.`,
+};
+/** What "the usual" in those sentences is. */
+export const BASELINE_MEANING = `The usual is the median of the views that the account's ${BASELINE_ENTRIES} posts before it on the same channel had at the same age.`;
 type Rates = { share: number | null; save: number | null; engagement: number | null };
 
 /** An entry with its numbers at each age it has reached; an age it has not reached yet is missing, never read early. */

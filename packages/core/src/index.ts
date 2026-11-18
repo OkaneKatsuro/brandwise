@@ -8,6 +8,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import pg from "pg";
 import { createContext } from "./context/index.ts";
 import { nodeNet } from "./context/research.ts";
+import { createMap } from "./map/index.ts";
 import { createStyles } from "./styles/index.ts";
 import { fetchRepository } from "./styles/source.ts";
 import { createSettings, type Scope, type SettingValue } from "./settings.ts";
@@ -459,6 +460,9 @@ export function createCore(cfg: CoreConfig) {
   // The styles a creative can be generated in: the built-in ones and those of the style packs a person switched on (step 6).
   const styles = createStyles({ pool, fetch: fetchRepository });
 
-  return { campaigns, calendar, publishing, channels, assets, settings, generation, context, styles, pool, close: async () => { await pool.end(); s3.destroy(); } };
+  // The company map: one read of where everything of a company came from and where it went (docs/map.md).
+  const map = createMap({ pool, campaigns, context });
+
+  return { campaigns, calendar, publishing, channels, assets, settings, generation, context, styles, map, pool, close: async () => { await pool.end(); s3.destroy(); } };
 }
 export type Core = ReturnType<typeof createCore>;

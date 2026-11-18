@@ -12,7 +12,7 @@ export type { StyleVirality } from "./virality.ts";
 /** An entry's virality with what a person needs to recognise it. `exposures` is the number at the moment asked, not at an age. */
 export type EntryVirality = Virality & { title: string; exposures: number | null; style: string };
 
-const refOf = (e: CalendarEntry): EntryRef => ({ id: e.id, campaignId: e.campaignId, channel: e.channel, externalId: e.externalId, externalUrl: e.externalUrl });
+const refOf = (e: EntryRef): EntryRef => ({ id: e.id, campaignId: e.campaignId, channel: e.channel, externalId: e.externalId, externalUrl: e.externalUrl });
 
 export function createMetrics(deps: { core: Core; sources: MetricsSource[] }) {
   const { core } = deps;
@@ -33,7 +33,7 @@ export function createMetrics(deps: { core: Core; sources: MetricsSource[] }) {
   }
 
   /** The numbers of these entries as of `asOf`, in the entries' order. An entry no source measures has empty values. */
-  async function forEntries(entries: CalendarEntry[], asOf: Date): Promise<EntryMetrics[]> {
+  async function forEntries(entries: EntryRef[], asOf: Date): Promise<EntryMetrics[]> {
     const live = new Map<string, { source: string; snap: Snapshot }[]>();
     const add = (source: string, snap: Snapshot) => live.set(snap.entryId, [...(live.get(snap.entryId) ?? []), { source, snap }]);
     const order = new Map(deps.sources.map((s, i) => [s.id, i]));
@@ -73,16 +73,17 @@ export function createMetrics(deps: { core: Core; sources: MetricsSource[] }) {
    * with every campaign under it, whichever campaign is asked for. Numbers are read as of each age after an entry reached its
    * audience, for the entry and for the earlier entries alike, so a 24-hour number only ever meets 24-hour numbers; an entry younger
    * than an age has no number at it. An entry that had not reached an audience by `asOf` is neither judged nor part of a baseline.
+   * `entryIds` lists these entries only: a page that shows some of a company's entries asks for exactly those.
    */
-  async function virality(campaign: Campaign, asOf: Date, opts: { channel?: string; last?: number } = {}): Promise<EntryVirality[]> {
+  async function virality(campaign: Campaign, asOf: Date, opts: { channel?: string; last?: number; entryIds?: readonly string[] } = {}): Promise<EntryVirality[]> {
     const company = await published(campaign.rootId);
     const current = await forEntries(company, asOf);
     const pool = company.flatMap((entry, i) => {
       const startedAt = current[i].startedAt;
       return startedAt !== null && Date.parse(startedAt) <= asOf.getTime() ? [{ entry, channel: entry.channel, startedAt, exposures: current[i].values.exposures ?? null }] : [];
     });
-    const mine = await under(campaign.id);
-    const listed = pool.filter((p) => mine.has(p.entry.campaignId) && (!opts.channel || p.channel === opts.channel))
+    const mine = await under(campaign.id), asked = opts.entryIds && new Set(opts.entryIds);
+    const listed = pool.filter((p) => mine.has(p.entry.campaignId) && (!opts.channel || p.channel === opts.channel) && (!asked || asked.has(p.entry.id)))
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, opts.last);
     // every entry has its own moments (its start plus each age), so each is read on its own: only the listed entries and the
     // earlier ones their baselines are taken from, not the company's whole history

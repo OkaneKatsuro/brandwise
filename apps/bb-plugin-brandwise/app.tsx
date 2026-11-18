@@ -1,6 +1,6 @@
 // bb-plugin-brandwise — frontend entry. React and the SDK come from the host.
-// Surfaces: Calendar (full-surface calendar + approval sidebar, see calendar.tsx), Creatives, Video and
-// Campaigns pages, a pending-approval badge, and a homepage section listing what waits for a human.
+// Surfaces: Calendar (full-surface calendar + approval sidebar, see calendar.tsx), Creatives, Video, E-mail, Map (see
+// map-page.tsx) and Campaigns pages, a pending-approval badge, and a homepage section listing what waits for a human.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { definePluginApp, experimental_THREAD_ACTION_GROUPS, useBbNavigate, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
@@ -9,6 +9,7 @@ import { ScreenAgentTab } from "./agent-tab";
 import { SCREENS } from "./agents";
 import { VideoPage } from "./video-page";
 import { EmailPage } from "./email-page";
+import { MapPage } from "./map-page";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
@@ -963,6 +964,13 @@ export default definePluginApp((app) => {
     icon: "brandwise/email",
     path: "email",
     component: EmailPage,
+  });
+  app.slots.navPanel({
+    id: "map",
+    title: "Map",
+    icon: "brandwise/map",
+    path: "map",
+    component: MapPage,
   });
   // "Start agent" in the side panel of every page above: the tab reads the page's route, so the agent knows where the user is
   for (const screen of SCREENS) {

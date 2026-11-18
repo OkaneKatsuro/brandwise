@@ -5,7 +5,7 @@ description: Manage BrandWise campaigns, the content calendar and assets with th
 
 # BrandWise
 
-Data lives in Postgres (campaigns, calendar, asset records) and S3 (the files). The Calendar and Creatives pages in the BB sidebar and `bb brandwise` read and write the same data.
+Data lives in Postgres (campaigns, calendar, asset records) and S3 (the files). The Calendar and Creatives pages in the BB sidebar and `bb brandwise` read and write the same data. The Map page shows one company from the sites its product pack was read from to what its posts brought; it only shows, every change is made with the commands below.
 
 The calendar is the only way anything leaves the system: never publish directly, add an entry.
 

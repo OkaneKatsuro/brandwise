@@ -42,6 +42,7 @@ For e-mail campaigns an **editor agent** closes the loop: it reads the statistic
 | Video (optional) | Remotion projects per campaign, Remotion Studio embedded next to an agent chat, renders land in Creatives |
 | E-mail templates | MJML templates per campaign with slots and a brand file, a live preview page, lint (unsubscribe, postal address, size, alt text, links, ...), full-page pictures for agents, test sends, an agent that edits the template while you watch. Optional engine in `packages/email-engine`, design in [`docs/email-templates.md`](docs/email-templates.md) |
 | Editor (regulator) | An editor agent steers an e-mail campaign as a feedback loop: signals, A/B experiments judged by code (maturity, minimum sample, hysteresis, guards, cooldown), tasks for author agents, a journal. Testable in minutes on a simulated provider and clock, see [`docs/editor.md`](docs/editor.md) |
+| Map | A read-only board of one company: the sites its pack was read from, the pack, campaigns, creatives, posts and what they brought, each linked to what it came from. A click lights up a card's chain. See [`docs/map.md`](docs/map.md) |
 | Agents | "Start agent" in the side panel of every page; the agent knows which page and project you are on |
 
 ## Architecture

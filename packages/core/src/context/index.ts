@@ -94,6 +94,20 @@ export function createContext(deps: {
         return { doc: versionFrom(row), added: true };
       });
     },
+    /**
+     * The pack as it stood at `moment`: of every file the newest version written by then, by name. A version a person confirmed
+     * only later was a draft at that moment and is returned as one. Rows are only added, so what an entry was written from is
+     * read by time: no link to a version is kept.
+     */
+    async asOf(campaignId: string, moment: Date): Promise<DocVersion[]> {
+      const rows = await q(
+        `select distinct on (name) name, version, author, created_at,
+                case when confirmed_at <= $2 then confirmed_at end as confirmed_at, case when confirmed_at <= $2 then confirmed_by end as confirmed_by
+         from context_doc where campaign_id = $1 and created_at <= $2 order by name, version desc`,
+        [await packOf(campaignId), moment.toISOString()],
+      );
+      return rows.map(versionFrom);
+    },
     /** Every version of a file, oldest first: who wrote it and when, who confirmed it and when. Empty when the pack has no such file. */
     async history(campaignId: string, name: string): Promise<DocVersion[]> {
       refuse(nameProblem(name));
@@ -195,3 +209,4 @@ export function createContext(deps: {
     },
   };
 }
+export type Context = ReturnType<typeof createContext>;

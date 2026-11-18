@@ -42,7 +42,7 @@ const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d
 const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const mondayOf = (d: Date) => addDays(d, -((d.getDay() + 6) % 7));
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const whenOf = (iso: string) =>
+export const whenOf = (iso: string) =>
   new Date(iso).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const toLocalInput = (d: Date) => `${dayKey(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const at9 = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 9, 0);
@@ -63,12 +63,13 @@ const subscribe = (l: () => void) => {
   };
 };
 const useShared = () => useSyncExternalStore(subscribe, () => shared);
-const openEntry = (e: CalendarEntry, mode: Shared["mode"] = "view", jump = false) =>
+/** Open an entry's dialog on the Calendar page, from the page itself, its sidebar or another page that then navigates there. */
+export const openEntry = (e: Pick<CalendarEntry, "id" | "scheduledAt">, mode: Shared["mode"] = "view", jump = false) =>
   setShared({ openId: e.id, mode, ...(jump ? { day: new Date(e.scheduledAt) } : {}) });
 const closeEntry = () => setShared({ openId: null, mode: "view" });
 
 /** Creatives (thumbnail and preview) of the given asset ids, fetched once each. */
-function useCreatives(ids: readonly string[]) {
+export function useCreatives(ids: readonly string[]) {
   const rpc = useRpc<typeof rpcContract>();
   const [map, setMap] = useState<Record<string, Creative>>({});
   const key = ids.join(",");
@@ -99,7 +100,7 @@ const STATUS: Record<string, { label: string; tone: string; dashed?: boolean }> 
   failed: { label: "Failed", tone: "text-destructive-text" },
   cancelled: { label: "Cancelled", tone: "text-muted-foreground" },
 };
-const statusOf = (s: string) => STATUS[s] ?? { label: s, tone: "text-muted-foreground" };
+export const statusOf = (s: string) => STATUS[s] ?? { label: s, tone: "text-muted-foreground" };
 const TIER_HINT: Record<number, string> = {
   1: "Tier 1, goes out automatically",
   2: "Tier 2, one click",
@@ -110,8 +111,40 @@ export const tookPlace = (e: CalendarEntry) => Date.parse(e.scheduledAt) <= Date
 /** Cancelled, published and past entries are frozen. */
 const editable = (e: CalendarEntry) => e.status !== "published" && e.status !== "cancelled" && !tookPlace(e);
 
-function Dot({ status }: { status: string }) {
+export function Dot({ status }: { status: string }) {
   return <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full bg-current", statusOf(status).tone)} />;
+}
+
+/** The small square picture of a creative; where there is none, a text glyph. */
+export function Thumb({ src }: { src: string | undefined }) {
+  return (
+    <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted/40 text-muted-foreground">
+      {src ? <img src={src} alt="" className="size-full object-cover" /> : <Icon name="FileText" className="size-5" />}
+    </span>
+  );
+}
+
+/** A creative as an entry shows it: a video with its controls, or the picture. */
+export function CreativeMedia({ creative }: { creative: Creative }) {
+  const src = creative.dataUri ?? creative.thumb;
+  return (
+    <div className="flex max-h-72 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
+      {creative.mime.startsWith("video/") ? (
+        <video src={src} controls muted playsInline className="max-h-72 max-w-full object-contain" />
+      ) : (
+        <img src={src} alt={creative.name} className="max-h-72 max-w-full object-contain" />
+      )}
+    </div>
+  );
+}
+
+/** The text of an entry as it will be published; an entry without one says so. */
+export function EntryText({ text }: { text: string }) {
+  return text === "" ? (
+    <p className="rounded-md border border-dashed border-border p-2 text-sm text-muted-foreground">No text yet.</p>
+  ) : (
+    <p className="whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-3 text-sm">{text}</p>
+  );
 }
 
 /** Two-step reject: a cancelled entry cannot be brought back, so the first click only arms the button. */
@@ -437,7 +470,6 @@ function EntryDialog({
   const rpc = useRpc<typeof rpcContract>();
   const creatives = useCreatives(entry?.assetId ? [entry.assetId] : []);
   const creative = entry?.assetId ? creatives[entry.assetId] : undefined;
-  const preview = creative === undefined ? null : (creative.dataUri ?? creative.thumb);
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState("");
   const [reason, setReason] = useState<"" | (typeof REVIEW_REASONS)[number]>("");
@@ -555,20 +587,8 @@ function EntryDialog({
               </div>
             ) : (
               <>
-                {preview === null ? null : (
-                  <div className="flex max-h-72 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
-                    {creative?.mime.startsWith("video/") ? (
-                      <video src={preview} controls muted playsInline className="max-h-72 max-w-full object-contain" />
-                    ) : (
-                      <img src={preview} alt={creative?.name ?? ""} className="max-h-72 max-w-full object-contain" />
-                    )}
-                  </div>
-                )}
-                {entry.body === "" ? (
-                  <p className="rounded-md border border-dashed border-border p-2 text-sm text-muted-foreground">No text yet.</p>
-                ) : (
-                  <p className="whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-3 text-sm">{entry.body}</p>
-                )}
+                {creative === undefined ? null : <CreativeMedia creative={creative} />}
+                <EntryText text={entry.body} />
                 <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">
                   <dt className="text-muted-foreground">When</dt>
                   <dd>{whenOf(entry.scheduledAt)}</dd>
@@ -815,9 +835,7 @@ export function ApprovalsSidebar() {
                   onClick={() => openEntry(e, "view", true)}
                   className="flex w-full min-w-0 gap-2 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
                 >
-                  <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted/40 text-muted-foreground">
-                    {thumb ? <img src={thumb} alt="" className="size-full object-cover" /> : <Icon name="FileText" className="size-5" />}
-                  </span>
+                  <Thumb src={thumb} />
                   <span className="min-w-0">
                     <span className="line-clamp-2 font-medium">{e.title}</span>
                     {e.body === "" ? (

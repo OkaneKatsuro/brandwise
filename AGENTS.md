@@ -27,6 +27,8 @@ Publishing channels (Telegram, e-mail, Facebook, Instagram, Threads, TikTok, You
 
 Video: `packages/video-remotion` is an optional engine (Remotion projects per campaign, Studio on 127.0.0.1, own licence, see its README); the plugin's Video page and `bb brandwise video ...` use it. Each BrandWise page has a "Start agent" action in its side panel (`apps/bb-plugin-brandwise/agents.ts`).
 
+The Map page (`apps/bb-plugin-brandwise/map-page.tsx`, `packages/core/src/map`) is a read-only board of one company, from the sites its pack was read from to what its posts brought: `docs/map.md`.
+
 ## Showing creatives in chat
 
 Every creative you produce (image or video poster) must be shown inline in the chat, not only named by path:
