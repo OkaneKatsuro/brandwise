@@ -42,11 +42,10 @@ with the machine, invisible to pages.
 
 - Table `context_doc (campaign_id, name, version, body, author, confirmed_at, created_at)`, primary key `(campaign_id, name, version)`.
   Rows are only added; the newest version of a name is the current one.
-- Table `context_source (id, campaign_id, kind, ref, fetched_at, note)`, `kind` in `site | social | file | interview`. Raw material
-  (page text, screenshots, brand books, logos) is stored as assets with role `reference` or `brand`, so it lives in S3 like everything
-  else and `ref` points to it.
-- The commands keep their names: `bb brandwise product list|get|set`. New: `product history <file>`, `product confirm` (only a person,
-  like approvals) and `product import` for packs already on disk.
+- The pack belongs to the company, the always-on base at the root: every campaign under it, however deep, reads and writes that pack.
+- The commands keep their names: `bb brandwise product list|get|set`. New: `product history <file>`, `product confirm` (a person's
+  command, like an approval) and `product import` for packs already on disk.
+- Where the pack came from is recorded from step 2 on, by the steps that read sources.
 - No link column is needed for lineage. Rows are only added, so "which context was in force when this entry was made" is answered by
   time: the newest confirmed version created before the entry.
 
@@ -55,9 +54,15 @@ Done when: a pack written on one machine is read on another, and `product histor
 ## Step 2: research from the site
 
 - `bb brandwise research site <url> [--pages 12] --campaign <c>` reads the home page and the pages its navigation links to, up to the
-  limit. It keeps readable text, titles, descriptions, OpenGraph and JSON-LD (organisation, product, prices), saves each page as a
-  `reference` asset, takes one screenshot of the home page with the headless Chrome adapter the e-mail preview already uses, and prints
-  a bounded digest. Same pattern as `roadmap.md` item 8: the provider is a small adapter, the output is never a raw export.
+  limit. It keeps readable text, titles, descriptions, OpenGraph and JSON-LD (organisation, product, prices), saves each page's text
+  as a `reference` asset and prints a bounded digest. Same pattern as `roadmap.md` item 8: the output is never a raw export.
+- Pages are fetched as plain HTML and parsed (`parse5`); no browser runs and no script of the site is executed. A site that only
+  renders in the browser gives little text; the command says so, and the interview covers the rest.
+- The address comes from a person or from text an agent read, so the fetch is fenced: http and https only, public addresses only
+  (the address a name resolves to is checked and is the one connected to, also after every redirect), a time and size limit per page,
+  `robots.txt` honoured, one request at a time.
+- Table `context_source (id, campaign_id, kind, ref, asset_id, fetched_at, note)`: one row per page read, `kind` is `site`. Later
+  steps add their kinds (`social`, `file`). The page's text is the asset, in S3 like everything else.
 - The skill `product-onboarding` gets a new order: research, draft, questions, summary, confirmation.
   1. Draft `product.md`, `audience.md` and `voice.md` from the digest, every statement with the page it came from.
   2. `claims.md`: only claims found on the site word for word, with the page as their source. Nothing is invented.
@@ -74,9 +79,10 @@ Done when: a founder gives one URL, answers at most ten questions, and an agent 
 For a company that already has a site, the look is documented, not designed (`brand-system.md`: "change nothing, only document it").
 The full generator for companies without an identity stays as planned there.
 
-- Code collects candidates, never the model: `research site` also returns the colours of the page by where they are used (background,
-  text, main button, links), the font families of headings and body, and logo candidates (header image, icon, OpenGraph image), all
-  read from the rendered page. For an uploaded logo, its dominant colours.
+- Code collects candidates, never the model: `research look <url>` renders the home page in the headless Chrome the e-mail preview
+  already uses and returns a screenshot (a `reference` asset), the colours of the page by where they are used (background, text,
+  main button, links), the font families of headings and body, and logo candidates (header image, icon, OpenGraph image). For an
+  uploaded logo, its dominant colours. The page's scripts are off and requests to anything but public addresses are refused.
 - Design files come in as assets: `bb brandwise assets add <file> --role brand` (brand book as PDF, exported frames, fonts). The agent
   reads them and proposes roles for the candidates; the person confirms.
 - Result in the pack: `design.md` (palette with roles, fonts, logo rules, image style, what to avoid) and `design.json` (the same
