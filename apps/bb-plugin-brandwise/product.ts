@@ -19,11 +19,12 @@ const fmt = (v: DocVersion) =>
 
 /**
  * One source of the pack on a line. A site: its latest read, and what the reader noted about its pages. A page the look was
- * taken from: its latest render, the asset that holds the picture, and what was noted.
+ * taken from: its latest render, the asset that holds the picture, and what was noted. That page's address is where the
+ * browser ended, which the page decides, so it stands in quotes; the notes are words of ours.
  */
 const fmtSource = (s: SiteSource | LookSource) => (s.kind === "site"
   ? `source: ${s.site}  read ${s.readAt.slice(0, 16)}  ${s.pages} ${s.pages === 1 ? "page" : "pages"}${s.notes.length ? `  (on some: ${s.notes.join("; ")})` : ""}`
-  : `source: ${s.page}  look taken ${s.readAt.slice(0, 16)}  ${s.assetId === null ? "picture deleted" : `picture: asset ${s.assetId}`}${s.note === null ? "" : `  (${s.note})`}`);
+  : `source: ${JSON.stringify(s.page)}  look taken ${s.readAt.slice(0, 16)}  ${s.assetId === null ? "picture deleted" : `picture: asset ${s.assetId}`}${s.note === null ? "" : `  (${s.note})`}`);
 
 /** `bb brandwise product list | get [<file>] | set <file> (--body <text> | --file <path>) | history <file> | confirm [<file>] | import [--dir <folder>]` */
 export async function productCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage, actor }: Io) {
