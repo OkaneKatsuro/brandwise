@@ -63,10 +63,12 @@ run("the pack belongs to the always-on base: a campaign under it reads and write
     const { context } = core;
     const base = await core.campaigns.add({ name: `${tag}-base`, kind: "always_on" });
     const child = await core.campaigns.add({ name: `${tag}-launch`, kind: "campaign", parentId: base.id });
+    const grandchild = await core.campaigns.add({ name: `${tag}-launch-week-1`, kind: "campaign", parentId: child.id });
     const stranger = await core.campaigns.add({ name: `${tag}-stranger`, kind: "always_on" });
 
     await context.set(child.id, "product.md", "A CLI for marketing.", "cli");
     assert.equal((await context.get(base.id, "product.md"))?.body, "A CLI for marketing.\n", "written through the campaign, read through its base");
+    assert.equal((await context.get(grandchild.id, "product.md"))?.body, "A CLI for marketing.\n", "a campaign two levels down reads the company's pack, not its parent's");
     await context.set(base.id, "product.md", "A CLI for founders' marketing.", "cli");
     assert.deepEqual((await context.history(child.id, "product.md")).map((v) => v.version), [1, 2], "one file, one history");
     assert.deepEqual((await context.confirm(child.id, "cli")).map((v) => [v.name, v.version]), [["product.md", 2]]);
@@ -75,6 +77,7 @@ run("the pack belongs to the always-on base: a campaign under it reads and write
     await assert.rejects(context.list(randomUUID()), /No campaign with id/);
 
     const rows = async () => Number((await core.pool.query("select count(*) as n from context_doc where campaign_id = $1", [base.id])).rows[0].n);
+    await core.pool.query("delete from campaign where id = any($1::uuid[])", [[grandchild.id]]);
     await core.pool.query("delete from campaign where id = $1", [child.id]);
     assert.equal(await rows(), 2, "the pack is its base's: it stays when a campaign under the base goes");
     await core.pool.query("delete from campaign where id = $1", [base.id]);

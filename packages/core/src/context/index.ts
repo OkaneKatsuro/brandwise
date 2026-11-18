@@ -23,9 +23,9 @@ const refuse = (problem: string | null) => { if (problem) throw new Error(proble
 export function createContext(deps: { pool: pg.Pool }) {
   const q: Query = async (sql, params = []) => (await deps.pool.query(sql, params)).rows;
 
-  /** The pack belongs to the always-on base: a campaign under it reads and writes its base's pack. */
+  /** The pack belongs to the company, the always-on base at the root: every campaign under it, however deep, reads and writes that pack. */
   const packOf = async (campaignId: string): Promise<string> => {
-    const row = (await q("select coalesce(parent_id, id) as id from campaign where id = $1", [campaignId]))[0];
+    const row = (await q("select root_id as id from campaign where id = $1", [campaignId]))[0];
     if (!row) throw new Error(`No campaign with id ${campaignId}`);
     return row.id;
   };
@@ -106,7 +106,8 @@ export function createContext(deps: { pool: pg.Pool }) {
     /**
      * Bring in packs that were kept on disk before the database held them: `<dir>/<campaign id>/` with the pack's files. A file
      * the database has no version of becomes version 1 (a draft, by `author`); a file it has is left as it is, so importing
-     * twice adds nothing. The folders are only read. `unknown` are folders that are named after no campaign.
+     * twice adds nothing. A folder named after a campaign under a company goes to the company's pack. The folders are only read.
+     * `unknown` are folders that are named after no campaign.
      */
     async importDir(dir: string, author: string): Promise<{ packs: ImportedPack[]; unknown: string[] }> {
       if (!(await stat(dir).then((s) => s.isDirectory(), () => false))) throw new Error(`No folder at ${dir}: give the folder that holds the packs (<campaign id>/*.md)`);
@@ -123,13 +124,13 @@ export function createContext(deps: { pool: pg.Pool }) {
           if (reason === null) files.push({ name, text: stored(body) });
           else skipped.push({ name, reason });
         }
-        // the folder's name is the pack's own id, the one the disk layout was keyed by, so it is not resolved to a base again
-        const written = await inTurn(folder, async (tx) => {
-          const have = new Set((await tx("select distinct name from context_doc where campaign_id = $1", [folder])).map((r: any) => r.name as string));
+        const pack = await packOf(folder);
+        const written = await inTurn(pack, async (tx) => {
+          const have = new Set((await tx("select distinct name from context_doc where campaign_id = $1", [pack])).map((r: any) => r.name as string));
           const added: string[] = [], kept: string[] = [];
           for (const f of files) {
             if (have.has(f.name)) { kept.push(f.name); continue; }
-            await tx("insert into context_doc (campaign_id, name, version, body, author) values ($1,$2,1,$3,$4)", [folder, f.name, f.text, author]);
+            await tx("insert into context_doc (campaign_id, name, version, body, author) values ($1,$2,1,$3,$4)", [pack, f.name, f.text, author]);
             added.push(f.name);
           }
           return { added, kept };
