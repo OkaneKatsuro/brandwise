@@ -36,6 +36,9 @@ test("reach without shares does not count: four times the views with no shares, 
   assert.equal(verdict({ "24h": { exposures: 4000 } }), "above", "shares not measured: unknown is not 'enough'");
   const unshared = history().map((h) => ({ ...h, at: { "24h": { ...h.at["24h"]!, values: { exposures: 1000 } } } }));
   assert.equal(verdict({ "24h": { exposures: 4000, shares: 40 } }, unshared), "above", "no earlier post reports shares: there is no usual rate to reach");
+  const neverShared = history().map((h) => ({ ...h, at: { "24h": { ...h.at["24h"]!, values: { exposures: 1000, shares: 0 } } } }));
+  assert.equal(verdict({ "24h": { exposures: 4000, shares: 0 } }, neverShared), "above", "an account whose posts are never shared: a post nobody shared did not spread either");
+  assert.equal(verdict({ "24h": { exposures: 4000, shares: 1 } }, neverShared), "viral", "the first post of that account that is shared");
 });
 
 test("too little history is unknown: an account with three posts, and one whose earlier posts mostly lack the number", () => {

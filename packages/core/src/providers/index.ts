@@ -98,6 +98,6 @@ export const SETTING_FIELDS: SettingField[] = [
   // Virality is judged against the company's own history (metrics/virality.ts), so the company says how far above it counts as viral.
   {
     key: "virality.viralRatio", label: "Viral ratio", group: "Virality", type: "number", default: 3,
-    description: "A post is viral when, 24 hours after it was published, it has at least this many times the views that are usual for the company on that channel (the median of its previous 20 posts there) and is shared at least as often as they were. Read from the company, the always-on base: a value set on a campaign under it is not used.",
+    description: "A post is viral when, 24 hours after it was published, it has at least this many times the views that are usual for the company on that channel (the median of its previous 20 posts there) is shared at least once, and is shared at least as often as they were. Read from the company, the always-on base: a value set on a campaign under it is not used.",
   },
 ];

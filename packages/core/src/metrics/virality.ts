@@ -69,8 +69,9 @@ export const earlierOf = <T extends { channel: string; startedAt: string }>(entr
 
 function verdictOf(ratio: number | null, shareRate: number | null, baselineShareRate: number | null, viralRatio: number): Verdict {
   if (ratio === null) return "unknown";
-  // reach that was bought or accidental does not count: an entry shared less often than the account's posts usually are is at most "above"
-  if (ratio >= viralRatio && shareRate !== null && baselineShareRate !== null && shareRate >= baselineShareRate) return "viral";
+  // reach that was bought or accidental does not count: an entry nobody shared, or one shared less often than the account's posts
+  // usually are, is at most "above" (the first also where the account's posts usually get no shares at all)
+  if (ratio >= viralRatio && shareRate !== null && shareRate > 0 && baselineShareRate !== null && shareRate >= baselineShareRate) return "viral";
   if (ratio >= ABOVE_RATIO) return "above";
   return ratio >= BELOW_RATIO ? "typical" : "below";
 }

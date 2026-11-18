@@ -61,7 +61,7 @@ Times without an offset are read in the server's local time and shown in UTC.
 
 Read these before you say how a post or an e-mail performed; never estimate numbers yourself.
 
-The verdict is a rule, taken 24 hours after the entry reached its audience, and you never overrule or guess it: `viral` (at least the company's viral ratio, 3 unless a person changed it, and shared at least as often as its posts usually are), `above` (from x1.50), `typical`, `below` (under x0.67), `unknown`. `unknown` means the numbers do not allow a verdict: the entry is younger than 24 hours, no source measures exposures on its channel, or the channel has fewer than 5 earlier entries with numbers. Say that, not that the post did badly. A high ratio at 1 hour on a young entry is the early sign that it is taking off.
+The verdict is a rule, taken 24 hours after the entry reached its audience, and you never overrule or guess it: `viral` (at least the company's viral ratio, 3 unless a person changed it, shared at least once and at least as often as its posts usually are), `above` (from x1.50), `typical`, `below` (under x0.67), `unknown`. `unknown` means the numbers do not allow a verdict: the entry is younger than 24 hours, no source measures exposures on its channel, or the channel has fewer than 5 earlier entries with numbers. Say that, not that the post did badly. A high ratio at 1 hour on a young entry is the early sign that it is taking off.
 
 ## Assets
 

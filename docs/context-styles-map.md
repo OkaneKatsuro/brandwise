@@ -169,7 +169,7 @@ Computed by code in a pure module (`packages/core/src/metrics/virality.ts`), nev
 
   | Verdict | Rule |
   |---|---|
-  | `viral` | ratio at least 3 and share rate at least the baseline share rate (reach that was bought or accidental does not count) |
+  | `viral` | ratio at least 3, shared at least once, and a share rate at least the baseline share rate (reach that was bought or accidental does not count) |
   | `above` | ratio at least 1.5 |
   | `typical` | ratio between 0.67 and 1.5 |
   | `below` | ratio under 0.67 |

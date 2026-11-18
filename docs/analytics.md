@@ -84,7 +84,7 @@ Step 8 of `context-styles-map.md`. Whether an entry spread is computed by code (
 
   | Verdict | Rule |
   |---|---|
-  | `viral` | ratio at least the company's viral ratio (3) and a share rate at least the baseline share rate: reach that was bought or accidental does not count |
+  | `viral` | ratio at least the company's viral ratio (3), shared at least once, and a share rate at least the baseline share rate: reach that was bought or accidental does not count |
   | `above` | ratio at least 1.5 |
   | `typical` | ratio from 0.67 |
   | `below` | ratio under 0.67 |
