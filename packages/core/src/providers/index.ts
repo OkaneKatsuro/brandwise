@@ -19,6 +19,8 @@ export type GenSpec = {
   /** Any other parameter of the model (duration, sound, mode, quality...), by its name. */
   params?: Record<string, string>;
 };
+/** What a model id looks like. It becomes an argument of the provider's command, so nothing else is passed on. */
+export const MODEL_ID = /^[a-z0-9_.-]{2,64}$/;
 export type Job = { id: string; status: string; resultUrl: string | null };
 export type Auth = { ok: boolean; detail: string };
 /** What a provider call works with: the resolved settings of one scope, plus things only the host knows. */
