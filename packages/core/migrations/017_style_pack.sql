@@ -7,6 +7,7 @@ create table style_pack (
   revision     text,                          -- the commit of a git source; null for a folder
   author       text not null,
   licence      text not null,
+  digest       text not null,                 -- sha256 of the pack as stored: a person switches on the text they read, by this
   installed_at timestamptz not null default now(),
   installed_by text not null,                 -- cli, cli:<label>: the actor labels of entry_event, not a verified identity
   enabled_at   timestamptz,

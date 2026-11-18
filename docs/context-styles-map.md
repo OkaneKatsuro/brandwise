@@ -145,7 +145,9 @@ names the style.
   stored. From git only `https` is fetched, as a bare clone: nothing is checked out, so no hook, filter, submodule or large-file
   store of the repository is ever used, and this machine's git configuration is left out.
 - A recipe becomes a prompt, so a pack is off after `style add` and its styles cannot be used until a person has read them and
-  switched it on: `style enable <pack>` (a person's command, like `product confirm`; `style disable` switches it off again).
+  switched it on. `style review <pack>` shows what was stored, every style in full, with the digest of that text;
+  `style enable <pack> --digest <digest>` switches on exactly that text, so a pack that was added again in between stays off
+  (a person's commands, like `product confirm`; `style disable` switches it off again).
 - Step 6b, the Styles page: the styles there are, built-in and from packs, each with what `style show` says, and the switch of each
   pack.
 - No accounts, ratings or payments, and no list of packs kept by us yet: the project is open source, a git address is enough until

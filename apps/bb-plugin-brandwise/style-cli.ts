@@ -1,6 +1,7 @@
-// CLI of the style library: `bb brandwise style list|show` for the styles and `style packs|add|enable|disable|remove` for the
-// style packs. The styles, the packs and their rules live in packages/core/src/styles; this file parses arguments and prints.
-// Agents read styles; a person adds a pack, reads it and switches it on with `style enable` (skills/creative-styles).
+// CLI of the style library: `bb brandwise style list|show` for the styles and `style packs|add|review|enable|disable|remove` for
+// the style packs. The styles, the packs and their rules live in packages/core/src/styles; this file parses arguments and prints.
+// Agents read styles; a person adds a pack, reads what was stored (`style review`) and switches on that text by its digest
+// (`style enable`), as skills/creative-styles tells the agents.
 import type { Core } from "./core/index.ts";
 import type { InstalledPack, Style } from "./core/styles/index.ts";
 
@@ -28,7 +29,9 @@ const describe = (s: Style) => {
   ].join("\n");
 };
 
-/** Where a pack came from, for a person who is about to read it: the folder, or the repository and the commit that was stored. */
+/** As much of a pack's digest as a person has to type to switch it on. */
+const shortDigest = (p: InstalledPack) => p.digest.slice(0, 12);
+/** Where a pack came from: the folder, or the repository and the commit that was stored. */
 const origin = (p: InstalledPack) => `${p.source}${p.revision ? ` at commit ${p.revision.slice(0, 12)}` : ""}`;
 
 /**
@@ -37,11 +40,11 @@ const origin = (p: InstalledPack) => `${p.source}${p.revision ? ` at commit ${p.
  */
 const packLines = (p: InstalledPack) => [
   `${p.name}  ${p.enabledAt ? `on since ${p.enabledAt.slice(0, 16)} by ${p.enabledBy}` : "off"}`,
-  `    by ${JSON.stringify(p.author)}, licence ${JSON.stringify(p.licence)}; from ${origin(p)}, added ${p.installedAt.slice(0, 16)} by ${p.installedBy}`,
+  `    by ${JSON.stringify(p.author)}, licence ${JSON.stringify(p.licence)}; from ${origin(p)}, added ${p.installedAt.slice(0, 16)} by ${p.installedBy}, digest ${shortDigest(p)}`,
   `    ${p.styles.join(", ")}`,
 ].join("\n");
 
-/** `bb brandwise style list [--kind image|video] [--channel <c>] | show <id> | packs | add <folder | https git address> | enable <pack> | disable <pack> | remove <pack>` */
+/** `bb brandwise style list [--kind image|video] [--channel <c>] | show <id> | packs | add <folder | https git address> | review <pack> | enable <pack> --digest <digest> | disable <pack> | remove <pack>` */
 export async function styleCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage, actor }: Io) {
   if (action === "list") {
     const styles = await c.styles.list({ kind: val(args, "--kind"), channel: val(args, "--channel") });
@@ -60,10 +63,17 @@ export async function styleCli(c: Core, action: string | undefined, args: string
   }
   if (action === "add") {
     const pack = await c.styles.addPack(name, actor(args));
-    return reply(pack, `${pack.replaced ? "Replaced" : "Added"} pack ${pack.name}: ${pack.styles.join(", ")}\nIt is off: its styles are not listed and cannot be used. A person reads them (${origin(pack)}) and then switches the pack on with: bb brandwise style enable ${pack.name}`);
+    return reply(pack, `${pack.replaced ? "Replaced" : "Added"} pack ${pack.name}: ${pack.styles.join(", ")}\nIt is off: its styles are not listed and cannot be used. A person reads what was stored with: bb brandwise style review ${pack.name}`);
+  }
+  if (action === "review") {
+    const { pack, styles } = await c.styles.review(name);
+    const next = pack.enabledAt ? "" : `\n\nThis is the text that would become prompts. If it is what you want, switch on exactly this text: bb brandwise style enable ${pack.name} --digest ${shortDigest(pack)}`;
+    return reply({ pack, styles }, `${packLines(pack)}\n\n${styles.map(describe).join("\n\n")}${next}`);
   }
   if (action === "enable") {
-    const pack = await c.styles.enablePack(name, actor(args));
+    const digest = val(args, "--digest");
+    if (digest === undefined) return { exitCode: 1, stderr: `Give --digest <digest>: read the pack first with bb brandwise style review ${name}, which shows its styles and the digest of that text` };
+    const pack = await c.styles.enablePack(name, actor(args), digest);
     return reply(pack, `Pack ${pack.name} is on since ${pack.enabledAt?.slice(0, 16)} by ${pack.enabledBy}: ${pack.styles.join(", ")}`);
   }
   if (action === "disable") {

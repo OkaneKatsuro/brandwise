@@ -285,6 +285,11 @@ test("readRepository: a repository without a commit has no pack to read; one wit
   }
 });
 
+test("fetchRepository: a host that does not resolve, or is written with a final dot, is refused before git runs: nothing unchecked is left to git", async () => {
+  await assert.rejects(fetchRepository("https://no-such-host.invalid/extras.git"), /^Error: no-such-host\.invalid does not resolve to an address/);
+  await assert.rejects(fetchRepository("https://github.com./extras.git"), /^Error: github\.com\. ends with a dot/);
+});
+
 test("fetchRepository: git is held to https, and the temporary folder is gone when it fails", async () => {
   const root = mkdtempSync(join(tmpdir(), "bw-fetch-"));
   const before = process.env.TMPDIR;

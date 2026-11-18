@@ -71,18 +71,29 @@ const git = (args: string[]) =>
     }),
   );
 
+/** Tying git to an address (`http.curloptResolve`) came with git 2.37; an older git ignores it without a word. */
+async function gitTiesAddresses(): Promise<void> {
+  const [, major, minor] = /(\d+)\.(\d+)/.exec(await git(["--version"])) ?? [];
+  if (major === undefined || Number(major) < 2 || (Number(major) === 2 && Number(minor) < 37)) {
+    throw new Error("git 2.37 or newer is needed to fetch a style pack: an older one cannot be held to the address that was checked. Update git, or add the pack from a folder.");
+  }
+}
+
 /**
  * What makes git connect to the address that was checked. The address of a pack is typed in or copied from somewhere, and the
- * fetch runs where this machine's own network is in reach, so it must not become a way to probe that network: a host that is
- * this machine or of a private network is refused. A name is then tied to the public address it resolved to, so one that
- * resolves differently a moment later changes nothing. A name that does not resolve here can only be reached through a proxy,
- * and what a proxy reaches is the proxy's rule: it is left to git.
+ * fetch runs where this machine's own network is in reach, so it must not become a way to probe that network. The host has to
+ * resolve here, and to public addresses only; git is then tied to the first of them, so a name that resolves differently a
+ * moment later changes nothing. A name that does not resolve is refused: left to git, it could resolve later to an address
+ * nobody checked.
  */
 async function publicHost(url: URL): Promise<string[]> {
   const host = url.hostname.replace(/^\[|\]$/g, ""); // an IPv6 address comes in brackets
+  if (host.endsWith(".")) throw new Error(`${url.hostname} ends with a dot: give the host the way it is usually written`);
   const found = await lookup(host, { all: true }).catch(() => []);
+  if (found.length === 0) throw new Error(`${url.hostname} does not resolve to an address: check the address of the pack's repository`);
   if (found.some((a) => !isPublicAddress(a.address))) throw new Error(`${url.hostname} is this machine or a host of a private network: a pack is fetched from a public git host only. Give the pack's public https address, or the full path of a folder that holds it.`);
-  if (isIP(host) || found.length === 0) return [];
+  if (isIP(host)) return [];
+  await gitTiesAddresses();
   const { address, family } = found[0];
   return ["-c", `http.curloptResolve=${host}:${url.port || "443"}:${family === 6 ? `[${address}]` : address}`];
 }

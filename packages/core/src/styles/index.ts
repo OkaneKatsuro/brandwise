@@ -2,6 +2,7 @@
 // company; the caller picks one, fills its slots and code writes the prompt. Beside the built-in styles there are the styles of
 // packs (docs/context-styles-map.md, step 6), kept in Postgres, the same on every machine. A pack's text becomes prompts, so its
 // styles count only while the pack is switched on, which a person does after reading them.
+import { createHash } from "node:crypto";
 import type pg from "pg";
 import { BUILTIN_STYLES } from "./builtin/index.ts";
 import { selectStyles, styledSpec, type Style, type StyleRef, type StyleRequest } from "./domain.ts";
@@ -10,21 +11,29 @@ import { readFolder, type Fetch } from "./source.ts";
 
 export type { Style, StyleRef } from "./domain.ts";
 
-/** A pack as it is stored: where it came from, who added it, the addresses of its styles, and who switched it on (null: it is off). */
+/**
+ * A pack as it is stored: where it came from, who added it, the addresses of its styles, who switched it on (null: it is off), and
+ * the digest of its text, by which a person switches on exactly what they read.
+ */
 export type InstalledPack = {
-  name: string; source: string; revision: string | null; author: string; licence: string; styles: string[];
+  name: string; source: string; revision: string | null; author: string; licence: string; digest: string; styles: string[];
   installedAt: string; installedBy: string; enabledAt: string | null; enabledBy: string | null;
 };
 
 type Query = (sql: string, params?: unknown[]) => Promise<any[]>;
 
-const PACK = `p.name, p.source, p.revision, p.author, p.licence, p.installed_at, p.installed_by, p.enabled_at, p.enabled_by,
+const PACK = `p.name, p.source, p.revision, p.author, p.licence, p.digest, p.installed_at, p.installed_by, p.enabled_at, p.enabled_by,
   array(select s.pack || '/' || s.id from style_pack_style s where s.pack = p.name order by s.id) as styles`;
 const packFrom = (r: any): InstalledPack => ({
-  name: r.name, source: r.source, revision: r.revision, author: r.author, licence: r.licence, styles: r.styles,
+  name: r.name, source: r.source, revision: r.revision, author: r.author, licence: r.licence, digest: r.digest, styles: r.styles,
   installedAt: new Date(r.installed_at).toISOString(), installedBy: r.installed_by,
   enabledAt: r.enabled_at ? new Date(r.enabled_at).toISOString() : null, enabledBy: r.enabled_by,
 });
+/** A pack's text as one number: its own words about itself and every style. What a review shows is what this stands for. */
+const digestOf = (pack: { name: string; author: string; licence: string; styles: Style[] }) =>
+  createHash("sha256").update(JSON.stringify([pack.name, pack.author, pack.licence, pack.styles])).digest("hex");
+/** How much of a digest a person has to give: enough that no other text of the pack could share it by chance. */
+const DIGEST_GIVEN = /^[0-9a-f]{12,64}$/;
 /** A pack's style as the library hands it out: under its address, so that it can never stand in for a built-in style or another pack's. */
 const addressed = (pack: string, body: Style): Style => ({ ...body, id: `${pack}/${body.id}` });
 
@@ -70,7 +79,7 @@ export function createStyles(deps: { pool: pg.Pool; fetch: Fetch }) {
       [pack, address.slice(slash + 1)],
     ))[0];
     if (!row) throw new Error(`Unknown style "${address}": there is no style pack "${pack}". bb brandwise style packs lists the packs there are.`);
-    if (row.enabled_at === null) throw new Error(`Style pack "${pack}" is switched off, so "${address}" cannot be shown or used. A pack's text becomes prompts: a person reads its styles first and then switches it on with bb brandwise style enable ${pack}.`);
+    if (row.enabled_at === null) throw new Error(`Style pack "${pack}" is switched off, so "${address}" cannot be shown or used. A pack's text becomes prompts: a person reads its styles first (bb brandwise style review ${pack}) and then switches that text on.`);
     if (row.body === null) throw new Error(`Unknown style "${address}". Pack "${pack}" has ${row.ids.map((id: string) => `${pack}/${id}`).join(", ")}; bb brandwise style list says what each is for.`);
     return { style: addressed(pack, row.body), origin: `pack:${pack}` };
   }
@@ -107,10 +116,10 @@ export function createStyles(deps: { pool: pg.Pool; fetch: Fetch }) {
         const replaced = (await tx("select 1 from style_pack where name = $1", [pack.name])).length > 0;
         // the update of an existing row waits for whoever else is adding this pack, so two of them take turns
         await tx(
-          `insert into style_pack (name, source, revision, author, licence, installed_by) values ($1,$2,$3,$4,$5,$6)
+          `insert into style_pack (name, source, revision, author, licence, digest, installed_by) values ($1,$2,$3,$4,$5,$6,$7)
            on conflict (name) do update set source = excluded.source, revision = excluded.revision, author = excluded.author, licence = excluded.licence,
-             installed_at = now(), installed_by = excluded.installed_by, enabled_at = null, enabled_by = null`,
-          [pack.name, source.location, revision, pack.author, pack.licence, actor],
+             digest = excluded.digest, installed_at = now(), installed_by = excluded.installed_by, enabled_at = null, enabled_by = null`,
+          [pack.name, source.location, revision, pack.author, pack.licence, digestOf(pack), actor],
         );
         await tx("delete from style_pack_style where pack = $1", [pack.name]);
         await tx("insert into style_pack_style (pack, id, body) select $1, s ->> 'id', s from json_array_elements($2::json) s", [pack.name, JSON.stringify(pack.styles)]);
@@ -118,13 +127,28 @@ export function createStyles(deps: { pool: pg.Pool; fetch: Fetch }) {
       });
     },
     /**
-     * A person switches a pack on after reading its styles: from then on they are listed and can be used. A pack that is on
-     * keeps who switched it on and when. `actor` is a label, as for the confirmation of the product pack, not a verified
-     * identity: that agents never switch a pack on is a rule of their skills.
+     * A pack as it is stored, for the person who decides about it: every style in full under its address, whether the pack is on
+     * or off, and the digest of exactly that text.
      */
-    async enablePack(name: string, actor: string): Promise<InstalledPack> {
-      await q("update style_pack set enabled_at = now(), enabled_by = $2 where name = $1 and enabled_at is null", [name, actor]);
-      return packNamed(name);
+    async review(name: string): Promise<{ pack: InstalledPack; styles: Style[] }> {
+      const row = (await q(
+        `select ${PACK}, coalesce((select json_agg(s.body order by s.id) from style_pack_style s where s.pack = p.name), '[]'::json) as bodies
+         from style_pack p where p.name = $1`, [name]))[0];
+      if (!row) throw noPack(name);
+      return { pack: packFrom(row), styles: (row.bodies as Style[]).map((body) => addressed(name, body)) };
+    },
+    /**
+     * A person switches a pack on after reading its styles: from then on they are listed and can be used. `digest` is the one the
+     * review showed (its first 12 characters are enough). It ties the switch to the text that was read: a pack that was added
+     * again in between has another digest and stays off. `actor` is a label, as for the confirmation of the product pack, not a
+     * verified identity: that agents never switch a pack on is a rule of their skills.
+     */
+    async enablePack(name: string, actor: string, digest: string): Promise<InstalledPack> {
+      if (!DIGEST_GIVEN.test(digest)) throw new Error(`Give the digest that bb brandwise style review ${name} shows, 12 characters of it or more: it says which text of the pack you read`);
+      await q("update style_pack set enabled_at = now(), enabled_by = $2 where name = $1 and enabled_at is null and left(digest, length($3)) = $3", [name, actor, digest]);
+      const pack = await packNamed(name);
+      if (!pack.digest.startsWith(digest)) throw new Error(`Pack "${name}" is not the text with digest ${digest}: it was added again since you read it, and it stays ${pack.enabledAt ? "as it is" : "off"}. Read it again: bb brandwise style review ${name}`);
+      return pack;
     },
     /** Switch a pack off: its styles are no longer listed and cannot be used; assets made in them keep their record. */
     async disablePack(name: string): Promise<InstalledPack> {

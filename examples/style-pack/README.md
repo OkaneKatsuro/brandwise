@@ -57,10 +57,10 @@ One object per style. Every field but `models` and `params` is required, and no 
 Run these as a person, on a machine with BrandWise. Agents do not add packs or switch them on.
 
 1. `bb brandwise style add /full/path/to/your-pack` checks the whole pack and stores it. Fix what the message lists and run it again until it passes; nothing is stored before that.
-2. The pack is off after every `style add`. Read `bb brandwise style packs`, then switch it on: `bb brandwise style enable <name>`.
+2. The pack is off after every `style add`. Read what was stored, `bb brandwise style review <name>`, then switch on exactly that text with the digest the review shows: `bb brandwise style enable <name> --digest <digest>`.
 3. `bb brandwise style show <name>/<id>` prints the style as an agent sees it. `bb brandwise creative cost --style <name>/<id> --slot <slot>="<text>"... --campaign <c>` renders it and prices the generation without spending anything; `creative generate` with the same arguments makes the creative.
 4. Look at the result, read every word in the image, and try each aspect with `--aspect`.
-5. After a change, raise the style's `version` and run `style add` again. That replaces the pack and switches it off again, so `style enable` follows.
+5. After a change, raise the style's `version` and run `style add` again. That replaces the pack and switches it off again, so `style review` and `style enable` follow.
 
 `bb brandwise style disable <name>` switches the pack off, `bb brandwise style remove <name>` deletes it.
 
