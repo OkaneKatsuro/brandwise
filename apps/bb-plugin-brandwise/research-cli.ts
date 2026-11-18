@@ -40,15 +40,16 @@ const fmt = (d: SiteDigest) => [
 
 /**
  * The candidates of a look: the picture's asset, then each colour and font with how it was found, the logo addresses and what
- * was refused. A colour is a hex value code made. A font name and an address are the page's own words: each stands in quotes,
- * as JSON writes them, so nothing in it can pass for a word of ours; a refused host is on a quoted line, like the text of a site.
+ * was refused. A colour is a hex value code made. A font name and an address are the page's own words, the address the browser
+ * ended on among them, since the page may send it anywhere: each stands in quotes, as JSON writes them, so nothing in it can
+ * pass for a word of ours; a refused host is on a quoted line, like the text of a site.
  */
 const fmtLook = (d: LookDigest) => {
   const rows = (found: Record<string, { value: string; from: string } | null>, show: (value: string) => string) =>
     Object.entries(found).map(([name, f]) => `  ${name.padEnd(11)} ${f === null ? "not found" : `${show(f.value)}  (${f.from})`}`);
   return [
     d.notice,
-    `${d.page}: picture of the page is asset ${d.assetId}. Show it with ::creative{ids="${d.assetId}"}`,
+    `page ${JSON.stringify(d.page)}: its picture is asset ${d.assetId}. Show it with ::creative{ids="${d.assetId}"}`,
     ...(d.note === null ? [] : [`note: ${d.note}`]),
     "colours:", ...rows(d.colors, (hex) => hex),
     "fonts:", ...rows(d.fonts, (family) => JSON.stringify(family)),
