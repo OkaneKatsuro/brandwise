@@ -1,11 +1,11 @@
-// CLI of the product pack: `bb brandwise product ...`. The pack itself (versions, confirmation, the sites it was drawn from, the
-// import of packs kept on disk) lives in packages/core/src/context; this file parses arguments and prints. Agents read the pack
-// with `product get`, the onboarding wizard (skills/product-onboarding) writes it with `product set`, a person confirms it with
-// `product confirm`.
+// CLI of the product pack: `bb brandwise product ...`. The pack itself (versions, confirmation, the sites it was drawn from and
+// the page its look was taken from, the import of packs kept on disk) lives in packages/core/src/context; this file parses
+// arguments and prints. Agents read the pack with `product get`, the onboarding wizard (skills/product-onboarding) writes it
+// with `product set`, a person confirms it with `product confirm`.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { DocVersion, SiteSource } from "./core/context/index.ts";
+import type { DocVersion, LookSource, SiteSource } from "./core/context/index.ts";
 import type { Core } from "./core/index.ts";
 
 type Io = { val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string; actor: (argv: string[]) => string };
@@ -17,9 +17,13 @@ const PACKS_ON_DISK = path.join(os.homedir(), ".bb-brandwise", "product");
 const fmt = (v: DocVersion) =>
   `v${String(v.version).padEnd(3)} ${v.createdAt.slice(0, 16)}  ${v.author.padEnd(16)} ${v.confirmedAt ? `confirmed ${v.confirmedAt.slice(0, 16)} by ${v.confirmedBy}` : "draft"}`;
 
-/** One site the pack was drawn from on a line: its latest read, and what the reader noted about its pages. */
-const fmtSource = (s: SiteSource) =>
-  `source: ${s.site}  read ${s.readAt.slice(0, 16)}  ${s.pages} ${s.pages === 1 ? "page" : "pages"}${s.notes.length ? `  (on some: ${s.notes.join("; ")})` : ""}`;
+/**
+ * One source of the pack on a line. A site: its latest read, and what the reader noted about its pages. A page the look was
+ * taken from: its latest render, the asset that holds the picture, and what was noted.
+ */
+const fmtSource = (s: SiteSource | LookSource) => (s.kind === "site"
+  ? `source: ${s.site}  read ${s.readAt.slice(0, 16)}  ${s.pages} ${s.pages === 1 ? "page" : "pages"}${s.notes.length ? `  (on some: ${s.notes.join("; ")})` : ""}`
+  : `source: ${s.page}  look taken ${s.readAt.slice(0, 16)}  ${s.assetId === null ? "picture deleted" : `picture: asset ${s.assetId}`}${s.note === null ? "" : `  (${s.note})`}`);
 
 /** `bb brandwise product list | get [<file>] | set <file> (--body <text> | --file <path>) | history <file> | confirm [<file>] | import [--dir <folder>]` */
 export async function productCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage, actor }: Io) {

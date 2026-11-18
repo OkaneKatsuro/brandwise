@@ -27,7 +27,8 @@ A style is a recipe for one kind of creative, shared by every company: a prompt 
 2. Every slot is required and no other name is accepted. Write each value in the form the slot asks for (a noun phrase, six words at most, exactly three changes): the template puts it into a sentence as it is.
 3. Words that end up in the image or in speech (headlines, changelog lines, a spoken line) must be covered by `claims.md` and allowed by `constraints.md`. A customer's quote is used word for word or not at all. Keep them as short as the slot says: long text gets misspelled.
 4. Slot values are plain text. Do not wrap them in quotation marks and do not add instructions for the model ("make it pop", "8k"): the template already carries composition, light and what to leave out.
-5. Give `--name <short name>`. Without it the asset is named after the style, so creatives of one style could not be told apart by name.
+5. Do not put the company's colours or image style into a slot or a prompt: code puts the company's look (the image style and palette of its confirmed `design.json`) in front of every prompt, and `creative cost` says whether it does.
+6. Give `--name <short name>`. Without it the asset is named after the style, so creatives of one style could not be told apart by name.
 
 Media flags work with a style as they do without one: `--ref <file>` for the real screenshot in `product-screen`, `--start-image <file>` for the approved still of a person in `founder-on-camera`. `--model`, `--duration` and `--param` replace what the style sets: use them when the user asks, or when the error says the style names no model for the campaign's provider (`creative models` lists what it offers).
 

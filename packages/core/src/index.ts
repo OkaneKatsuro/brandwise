@@ -6,6 +6,7 @@ import { basename, extname } from "node:path";
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import pg from "pg";
+import { promptInLook, type LookRef } from "./context/design.ts";
 import { createContext } from "./context/index.ts";
 import { nodeNet } from "./context/research.ts";
 import { createMap } from "./map/index.ts";
@@ -14,9 +15,11 @@ import { fetchRepository } from "./styles/source.ts";
 import { createSettings, type Scope, type SettingValue } from "./settings.ts";
 import { SETTING_FIELDS, providerById, type ProviderConfig } from "./providers/index.ts";
 
-export { MAX_PROMPT, MODEL_ID, PROVIDERS, SETTING_FIELDS, providerById } from "./providers/index.ts";
+export { MODEL_ID, PROVIDERS, SETTING_FIELDS, providerById } from "./providers/index.ts";
 export type { Auth, GenSpec, Job, Provider, ProviderConfig } from "./providers/index.ts";
 export { downloadResult, higgsfield, isFailed } from "./providers/higgsfield.ts";
+export { generationProvenance } from "./providers/provenance.ts";
+export type { LookRef } from "./context/design.ts";
 export { cookieJarFor, sessionFromCookieJar } from "./download.ts";
 export type { FieldView, Resolved, Scope, SettingField, SettingValue, Settings } from "./settings.ts";
 
@@ -428,6 +431,10 @@ export function createCore(cfg: CoreConfig) {
     },
   });
 
+  // The company's context: the pack of an always-on base as versioned files, the sites it was drawn from and the page its look
+  // was taken from (docs/context-styles-map.md, steps 1 to 3).
+  const context = createContext({ pool, saveAsset: assets.save, net: nodeNet });
+
   const generation = {
     /** The provider a scope generates with (or the given one), and its settings as that scope sees them. */
     async providerFor(scope: Scope, host: { profilesDir: string; bins?: Record<string, string> }, providerId?: string) {
@@ -451,11 +458,24 @@ export function createCore(cfg: CoreConfig) {
       }
       return out;
     },
+    /**
+     * The prompt a generation of a scope is asked with: the look of the scope's company in front of `prompt`, when its pack has
+     * a design.json that a person confirmed. No prompt has to name the look, so every creative of the company carries it.
+     * `brand` false leaves it out, and so does a scope that is no campaign. `styled`: a style wrote the prompt, so what the
+     * caller can shorten is its slot values. `look` is what the asset records; `note` says in one line what became of the look,
+     * null when the company has none or it was left out.
+     */
+    async branded(scope: Scope, prompt: string, opts: { brand: boolean; styled: boolean }): Promise<{ prompt: string; look: LookRef | null; note: string | null }> {
+      const { applied, draft } = opts.brand && scope !== null ? await context.look(scope) : { applied: null, draft: null };
+      const confirm = "until a person confirms it (bb brandwise product confirm design.json)";
+      return {
+        prompt: promptInLook(prompt, applied?.design ?? null, opts.styled ? "the slot values" : "the prompt"),
+        look: applied ? { version: applied.version } : null,
+        note: applied ? `The company's look stands in front of the prompt (design.json version ${applied.version})${draft === null ? "" : `; version ${draft} is a draft and is not applied ${confirm}`}`
+          : draft === null ? null : `The company's look is not applied: design.json version ${draft} is a draft ${confirm}`,
+      };
+    },
   };
-
-  // The company's context: the pack of an always-on base as versioned Markdown files, and the sites it was drawn from
-  // (docs/context-styles-map.md, steps 1 and 2).
-  const context = createContext({ pool, saveAsset: assets.save, net: nodeNet });
 
   // The styles a creative can be generated in: the built-in ones and those of the style packs a person switched on (step 6).
   const styles = createStyles({ pool, fetch: fetchRepository });

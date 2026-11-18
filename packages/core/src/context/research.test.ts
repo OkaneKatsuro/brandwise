@@ -1,12 +1,13 @@
-// Reading a site without a network: the fence of research.ts around a made-up network (testing.ts), and the real transport
-// against a server on this machine. What a page says is in site.test.ts, what is stored in research.db.test.ts.
+// Reading a site and rendering a page without a network or a browser: the fence of research.ts around a made-up network and a
+// pretend browser (testing.ts), and the real transport against a server on this machine. What a page says is in site.test.ts,
+// what a rendered page shows in look.test.ts, what is stored in research.db.test.ts and look.db.test.ts.
 import assert from "node:assert/strict";
 import type { LookupAddress } from "node:dns";
 import http from "node:http";
-import type { AddressInfo, LookupFunction } from "node:net";
+import net, { type AddressInfo, type LookupFunction } from "node:net";
 import { test } from "node:test";
-import { nodeNet, readSite, type Net } from "./research.ts";
-import { html, madeUp, nav, PUBLIC, type Served } from "./testing.ts";
+import { nodeNet, readSite, renderPage, type Net } from "./research.ts";
+import { html, madeUp, nav, pretendBrowser, PUBLIC, renderedPage, type Served } from "./testing.ts";
 
 const to = (location: string, status = 302): Served => ({ status, location });
 
@@ -299,4 +300,75 @@ test("through the real transport, a name that resolves to this machine never get
   } finally {
     await close();
   }
+});
+
+// ---- rendering a page for its look -----------------------------------------------------------------------------------------
+
+/** Whether anything listens on a port of this machine. */
+const listening = (port: number) => new Promise<boolean>((resolve) => {
+  const socket = net.connect(port, "127.0.0.1");
+  socket.once("connect", () => { socket.destroy(); resolve(true); });
+  socket.once("error", () => resolve(false));
+});
+
+test("a page is rendered where its redirects lead, behind a proxy that lives for that one render, with one time limit; what the page asked for in vain is counted, not fatal", async () => {
+  const { net: made, seen } = madeUp(ACME, {
+    "https://acme.example/robots.txt": { type: "text/plain", body: "User-agent: *\nDisallow: /admin/\n" },
+    "https://acme.example/": to("/en/", 301),
+    "https://acme.example/en/": html("Acme", "<h1>Widgets</h1>"),
+  });
+  let proxyWasUp = false;
+  const browser = pretendBrowser(renderedPage({ url: "https://acme.example/en/" }), ["http://10.0.0.5/pixel.png", "http://intranet.example/font.woff", "http://10.0.0.5/pixel.png"]);
+  const rendered = await renderPage({ ...made, resolve: async (host) => (host === "intranet.example" ? [{ address: "192.168.1.7", family: 4 }] : made.resolve(host)) }, async (page) => {
+    proxyWasUp = await listening(page.proxyPort);
+    return browser.render(page);
+  }, "https://acme.example/#top");
+
+  assert.deepEqual(seen.requests, ["https://acme.example/robots.txt", "https://acme.example/", "https://acme.example/en/"], "the address passed the fence of a read first, robots.txt and redirects included");
+  assert.deepEqual(seen.bodies, ["https://acme.example/robots.txt"], "the page itself is left for the browser to read");
+  assert.deepEqual(browser.asked.map((page) => [page.url, page.timeoutMs]), [["https://acme.example/en/", 30_000]], "the browser is sent where the redirects led, with 30 seconds for everything");
+  assert.equal(rendered.page.url, "https://acme.example/en/");
+  assert.deepEqual([rendered.png.length > 24, proxyWasUp, await listening(browser.asked[0].proxyPort)], [true, true, false], "the proxy was there for the render and is gone after it");
+  assert.deepEqual(rendered.refused, { count: 3, targets: [
+    { to: "10.0.0.5:80", reason: "10.0.0.5 is not a public address" },
+    { to: "intranet.example:80", reason: "intranet.example resolves to 192.168.1.7, which is not a public address" },
+  ] });
+});
+
+test("no browser is started for an address a read would refuse: not public, kept out by robots.txt, not a page of HTML, or led there by a redirect", async () => {
+  const { net: made } = madeUp({ ...ACME, "intranet.example": ["10.0.0.5"] }, {
+    "https://acme.example/robots.txt": { type: "text/plain", body: "User-agent: *\nDisallow: /admin/\n" },
+    "https://acme.example/admin/": html("Admin"),
+    "https://acme.example/gone": { status: 404 },
+    "https://acme.example/brochure.pdf": { type: "application/pdf", body: "%PDF-1.7" },
+    "https://acme.example/inside": to("http://10.0.0.5/"),
+    "https://acme.example/moved": to("/brochure.pdf"),
+  });
+  const browser = pretendBrowser(renderedPage());
+  const refused = (address: string, why: RegExp) => assert.rejects(renderPage(made, browser.render, address), why, address);
+  await refused("not an address", /"not an address" is not an address: give the whole address of a page/);
+  await refused("ftp://acme.example/", /ftp:\/\/acme\.example\/ was not rendered: only http and https addresses are read/);
+  await refused("http://127.0.0.1:8080/", /was not rendered: 127\.0\.0\.1 is not a public address/);
+  await refused("https://intranet.example/", /was not rendered: its robots\.txt was not read: intranet\.example resolves to 10\.0\.0\.5, which is not a public address/);
+  await refused("https://acme.example/admin/", /was not rendered: robots\.txt disallows it/);
+  await refused("https://acme.example/gone", /was not rendered: answered HTTP 404/);
+  await refused("https://acme.example/brochure.pdf", /was not rendered: not HTML \(application\/pdf\)/);
+  await refused("https://acme.example/inside", /was not rendered: redirects to http:\/\/10\.0\.0\.5\/: 10\.0\.0\.5 is not a public address/);
+  await refused("https://acme.example/moved", /https:\/\/acme\.example\/moved was not rendered: redirects to https:\/\/acme\.example\/brochure\.pdf: not HTML/);
+  assert.deepEqual(browser.asked, []);
+});
+
+test("a render that fails, takes too long or ends on an address that may not be read gives nothing, says why, and leaves no proxy behind", async () => {
+  const { net: made } = madeUp(ACME, { "https://acme.example/": html("Acme") });
+  const failing = async (shows: Parameters<typeof pretendBrowser>[0], why: RegExp) => {
+    const browser = pretendBrowser(shows);
+    await assert.rejects(renderPage(made, browser.render, "https://acme.example/"), why);
+    assert.deepEqual([browser.asked.length, await listening(browser.asked[0].proxyPort)], [1, false], String(why));
+  };
+  await failing(new DOMException("no picture in time", "TimeoutError"), /^Error: https:\/\/acme\.example\/ was not rendered: no picture within 30 s$/);
+  await failing(new Error("Chrome made no picture of the page: net::ERR_TUNNEL_CONNECTION_FAILED"), /was not rendered: Chrome made no picture of the page: net::ERR_TUNNEL_CONNECTION_FAILED$/);
+  await failing(new Error("x".repeat(1000)), /was not rendered: x{300}$/);
+  await failing(renderedPage({ url: "chrome-error://chromewebdata/" }), /was not rendered: the browser ended on "chrome-error:\/\/chromewebdata\/": only http and https addresses are read/);
+  await failing(renderedPage({ url: "http://192.168.1.1/login" }), /the browser ended on "http:\/\/192\.168\.1\.1\/login": 192\.168\.1\.1 is not a public address/);
+  await failing(renderedPage({ url: "" }), /the browser ended on "": that is not an address/);
 });

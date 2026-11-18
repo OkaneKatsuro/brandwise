@@ -4,7 +4,7 @@
 // Approved entries are fired by `calendar run-due`, which a bb automation runs every minute (infra/bb-instance/provision.sh).
 import { defineRpcContract, type BbPluginApi, type PluginSettingDescriptor } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { cookieJarFor, createCore, downloadResult, isFailed, MAX_PROMPT, MODEL_ID, PROVIDERS, REVIEW_REASONS, sessionFromCookieJar, STATUSES, type Core, type GenSpec, type Provider, type Scope, type SettingValue } from "./core/index.ts";
+import { cookieJarFor, createCore, downloadResult, generationProvenance, isFailed, MODEL_ID, PROVIDERS, REVIEW_REASONS, sessionFromCookieJar, STATUSES, type Core, type GenSpec, type LookRef, type Provider, type Scope, type SettingValue } from "./core/index.ts";
 import { createHmac, randomBytes } from "node:crypto";
 import * as cp from "node:child_process";
 import * as fsx from "node:fs";
@@ -13,6 +13,7 @@ import * as px from "node:path";
 import { agentContract, createAgents } from "./agents.ts";
 import { productCli } from "./product.ts";
 import { researchCli } from "./research-cli.ts";
+import { chromeRender } from "./core/context/chrome-render.ts";
 import { createVideo, videoContract } from "./video.ts";
 import { createMapRpc, mapContract } from "./map.ts";
 import { createEmailTemplates, templatesContract } from "./email-templates.ts";
@@ -238,11 +239,11 @@ export default async function plugin(bb: BbPluginApi) {
     section("video", "Video", "The optional Remotion engine behind the Video page.", {
       videoEnginePath: { type: "string", label: "Engine folder", description: "Folder holding render.mjs of @brandwise/video-remotion. Empty = video commands are off.", default: "" },
     }),
-    section("email-templates", "E-mail templates", "The optional engine behind the E-mail page: MJML and a headless Chrome for pictures.", {
-      emailEnginePath: { type: "string", label: "Engine folder", description: "Folder of @brandwise/email-engine (MJML, puppeteer). Empty = the e-mail template commands are off.", default: "" },
+    section("email-templates", "E-mail templates", "The optional engine behind the E-mail page and `research look`: MJML and a headless Chrome for pictures.", {
+      emailEnginePath: { type: "string", label: "Engine folder", description: "Folder of @brandwise/email-engine (MJML, puppeteer). Empty = the e-mail template commands and `research look` are off.", default: "" },
       publicAssetBucket: { type: "string", label: "Public image bucket", description: "A bucket whose objects anyone can read. Images in sent e-mails are copied here once, under a permanent address. Empty = e-mails with stored images cannot be sent yet.", default: "" },
       publicAssetBaseUrl: { type: "string", label: "Public image address", description: "The public address of that bucket or of the CDN in front of it, e.g. https://cdn.example.com.", default: "" },
-      chromePath: { type: "string", label: "Chrome", description: "Path of a Chrome or Chrome Headless Shell for pictures of e-mails. Empty = the one of the video engine, or a Chrome installed on this machine.", default: "" },
+      chromePath: { type: "string", label: "Chrome", description: "Path of a Chrome or Chrome Headless Shell for pictures of e-mails and of a company's page (`research look`). Empty = the one of the video engine, or a Chrome installed on this machine.", default: "" },
     }),
     section("telegram", "Telegram", "The channel the BrandWise posts to.", {
       resendApiKey: { type: "string", label: "Resend API key", description: "Switches the e-mail channel on (provider=resend in the campaign target).", default: "", secret: true },
@@ -414,7 +415,8 @@ export default async function plugin(bb: BbPluginApi) {
   // --- Generation: bb brandwise creative cost|generate|collect (also reachable over MCP `run`) ---
   // The provider, its account and its limits come from the scoped settings of the campaign (core/settings.ts): the campaign, then its
   // always-on base, then global. Spend is counted at every scope of that chain, so a budget set on a base covers all its campaigns.
-  type GenJob = { campaignId: string; provider?: string; role: "creative" | "source"; name: string | null; spec: GenSpec; style?: StyleRef; credits: number; startedAt: string; assetId?: string };
+  // `written` is the prompt as the caller or the style wrote it, without the company's look: what an unnamed creative is named after.
+  type GenJob = { campaignId: string; provider?: string; role: "creative" | "source"; name: string | null; spec: GenSpec; written?: string; style?: StyleRef; look?: LookRef | null; credits: number; startedAt: string; assetId?: string };
   const today = () => new Date().toISOString().slice(0, 10);
   // shortcut: the default data dir of this instance; read it from bb when the SDK offers it
   const PROFILES_DIR = px.join(osx.homedir(), ".bb-brandwise", "providers");
@@ -435,7 +437,7 @@ export default async function plugin(bb: BbPluginApi) {
     return { provider: provider.id, unit: provider.unit, credits, cap, budgets, spent: tight.spent, daily: tight.limit };
   }
   /** Cost check, then start the job (returns at once). Refuses over the per-call cap or any daily budget of the scope chain. */
-  async function startGeneration(c: Core, a: { spec: GenSpec; style?: StyleRef; campaign?: string; role: "creative" | "source"; name: string | null; maxCredits?: number }) {
+  async function startGeneration(c: Core, a: { spec: GenSpec; written: string; style?: StyleRef; look: LookRef | null; campaign?: string; role: "creative" | "source"; name: string | null; maxCredits?: number }) {
     const campaign = await c.campaigns.resolve(a.campaign);
     const k = await costOf(c, a.spec, campaign.id, a.maxCredits);
     if (k.credits > k.cap) throw new Error(`Estimated ${k.credits} ${k.unit} is over the limit of ${k.cap} for one generation. Nothing was spent.`);
@@ -445,7 +447,7 @@ export default async function plugin(bb: BbPluginApi) {
     const { provider, config } = await c.generation.providerFor(campaign.id, host());
     const job = await provider.start(config, a.spec);
     for (const scope of await c.settings.chain(campaign.id)) await bb.storage.kv.set(spendKey(provider.id, scope), (await spentAt(provider.id, scope)) + k.credits);
-    await bb.storage.kv.set(`gen_job:${job.id}`, { campaignId: campaign.id, provider: provider.id, role: a.role, name: a.name, spec: a.spec, style: a.style, credits: k.credits, startedAt: new Date().toISOString() });
+    await bb.storage.kv.set(`gen_job:${job.id}`, { campaignId: campaign.id, provider: provider.id, role: a.role, name: a.name, spec: a.spec, written: a.written, style: a.style, look: a.look, credits: k.credits, startedAt: new Date().toISOString() });
     return { jobId: job.id, credits: k.credits, provider: provider.id, unit: provider.unit };
   }
   /** Wait up to waitSeconds for the job; when done, download it and register it as an asset (idempotent per job). */
@@ -461,9 +463,9 @@ export default async function plugin(bb: BbPluginApi) {
       if (job.status === "completed" && job.resultUrl) {
         const ext = /\.(png|jpe?g|webp|gif|mp4|webm)(?:$|\?)/i.exec(new URL(job.resultUrl).pathname + "?")?.[1]?.toLowerCase() ?? "png";
         const asset = await c.assets.save({
-          campaignId: meta.campaignId, bytes: await downloadResult(job.resultUrl), filename: `${slug(meta.name ?? meta.style?.id ?? meta.spec.prompt)}.${ext}`,
+          campaignId: meta.campaignId, bytes: await downloadResult(job.resultUrl), filename: `${slug(meta.name ?? meta.style?.id ?? meta.written ?? meta.spec.prompt)}.${ext}`,
           role: meta.role, origin: "generated", aiGenerated: true, createdBy: "generate",
-          provenance: { tool: provider.id, model: meta.spec.model, jobId, prompt: meta.spec.prompt, aspect: meta.spec.aspect ?? null, resolution: meta.spec.resolution ?? null, refs: (meta.spec.refs ?? []).map((r) => r.split("/").pop()), creditsEstimated: meta.credits, style: meta.style ?? null },
+          provenance: generationProvenance({ provider: provider.id, jobId, spec: meta.spec, credits: meta.credits, style: meta.style, look: meta.look }),
         });
         await bb.storage.kv.set(`gen_job:${jobId}`, { ...meta, assetId: asset.id });
         bb.realtime.publish(ASSETS_CHANGED, {});
@@ -868,14 +870,15 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise assets download <url> [--campaign <c>]    (Instagram, TikTok, YouTube; runs on the host outside your sandbox, with the browser session the user picked under Settings > Providers > Downloads, if any; saved as a reference asset, prints its local path)",
     "  bb brandwise assets rename <id> <name> | assets set <id> --status <draft|linted|approved|archived> | assets delete <id>",
     "  bb brandwise creative models [--video|--image] [--campaign <c>] | creative model <model-id> [--campaign <c>]   (which models exist, and the parameters and media one model takes)",
-    "  bb brandwise creative cost (--prompt <text> | --style <id> --slot name=value...) [--campaign <c>] [--model nano_banana_pro] [--aspect 4:5] [--resolution 2k] [media and parameters as in generate]   (estimate, spends nothing)",
-    "  bb brandwise creative generate (--prompt <text> | --style <id> --slot name=value...) [--model ..] [--aspect ..] [--resolution ..] [--campaign <c>] [--role creative|source] [--name <n>] [--ref <image>]... [--start-image <image>] [--end-image <image>] [--video-ref <file>]... [--audio-ref <file>]... [--duration <n>] [--param name=value]... [--max-credits N] [--wait-seconds 18]   (which media and parameters a model takes: creative model <id>; with --style the style writes the prompt and sets the model, aspect and parameters that are not given)",
+    "  bb brandwise creative cost (--prompt <text> | --style <id> --slot name=value...) [--campaign <c>] [--model nano_banana_pro] [--aspect 4:5] [--resolution 2k] [--no-brand] [media and parameters as in generate]   (estimate, spends nothing; says whether the company's look stands in front of the prompt)",
+    "  bb brandwise creative generate (--prompt <text> | --style <id> --slot name=value...) [--model ..] [--aspect ..] [--resolution ..] [--campaign <c>] [--role creative|source] [--name <n>] [--ref <image>]... [--start-image <image>] [--end-image <image>] [--video-ref <file>]... [--audio-ref <file>]... [--duration <n>] [--param name=value]... [--no-brand] [--max-credits N] [--wait-seconds 18]   (which media and parameters a model takes: creative model <id>; with --style the style writes the prompt and sets the model, aspect and parameters that are not given; the company's look, its confirmed design.json, is put in front of every prompt by code, so no prompt or slot repeats it; --no-brand leaves it out)",
     "  bb brandwise creative collect <job-id> [--wait-seconds 18]   (finish a generation that was still running)",
     "  bb brandwise style list [--kind image|video] [--channel <c>] | style show <id>   (style recipes for creatives: what each is for, its slots, aspects and channels, the post text that goes with it, what to avoid; a built-in style has a bare id, a style of a pack is <pack>/<id>)",
     "  bb brandwise style packs | style add <full path of a folder | https git address> | style review <pack> | style enable <pack> --digest <digest> | style disable <pack> | style remove <pack>   (style packs, styles from outside. packs lists them with source, author, licence, digest and whether each is on; add checks the whole pack, stores it switched off and replaces a pack of that name; review shows what was stored, every style in full, and the digest of that text; enable switches on exactly the text with that digest. add, review, enable and remove are a person's commands)",
-    "  bb brandwise product list | get [<file>] | set <file> (--body <text> | --file <path>) | history <file> | confirm [<file>] [--campaign <c>]   (product pack: product.md audience.md claims.md constraints.md voice.md derived/<name>.md; shared by the always-on base and kept as versions: list shows each file's version, author and whether it is confirmed, and the sites the pack was drawn from; set adds a version that is a draft, confirm is a person's command for one file or all)",
+    "  bb brandwise product list | get [<file>] | set <file> (--body <text> | --file <path>) | history <file> | confirm [<file>] [--campaign <c>]   (product pack: product.md audience.md claims.md constraints.md voice.md derived/<name>.md, and the company's look in design.md and design.json; shared by the always-on base and kept as versions: list shows each file's version, author and whether it is confirmed, and the sites the pack was drawn from and the page its look was taken from; set adds a version that is a draft, and checks design.json: colors with the roles background, text, heading, link, primary, onPrimary as six-digit hex, at least background, text and primary; fonts heading, body; imagePromptPrefix, one line of at most 400 characters; confirm is a person's command for one file or all)",
     "  bb brandwise product import [--dir <folder>]   (bring in packs that were kept on disk, <folder>/<campaign id>/*.md, default ~/.bb-brandwise/product: a file the database does not have becomes version 1, the folder is left as it is; safe to repeat)",
     "  bb brandwise research site <url> [--pages 12] [--campaign <c>] [--as <label>]   (read a company's public site to draft its product pack from: the page at <url> and the pages its navigation, header and footer link to, 30 at most; plain HTML over http or https, public addresses only, robots.txt honoured, no browser; each page is kept as a reference asset, created by cli:<label>; prints a bounded digest of quoted material: per page its title, description, JSON-LD and the start of its text, then what was skipped and why)",
+    "  bb brandwise research look <url> [--campaign <c>] [--as <label>]   (take a company's look from one public page, to propose design.md and design.json from: the page is rendered in a headless Chrome with its scripts off, which reaches the network only through a proxy that refuses everything but public addresses on ports 80 and 443; robots.txt honoured; a picture of the top of the page, 1440 wide and at most two screens high, is kept as a reference asset, created by cli:<label>; prints the asset and the candidates code found: colours as hex by where the page uses them, the font families of headings and text, logo addresses, each with how it was found, and how many connections were refused; needs the optional engine, packages/email-engine)",
     "  bb brandwise video seed --dir <empty dir>   (copy the example Remotion project to start from; or --template <id> --campaign <c> = the campaign's project folder, which the Video page opens in Remotion Studio)",
     "  bb brandwise video studio --template <id> [--campaign <c>] [--stop]   (Remotion Studio for that project, 127.0.0.1 only)",
     "  bb brandwise video compositions --dir <project>   (ids, size, duration and defaultProps of each composition)",
@@ -888,7 +891,7 @@ export default async function plugin(bb: BbPluginApi) {
   const vals = (argv: string[], name: string) => argv.flatMap((a, i) => (a === name && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
   const val = (argv: string[], name: string) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
   const FLAGS_WITH_VALUE = new Set(["--kind", "--parent", "--from", "--to", "--campaign", "--channel", "--at", "--tier", "--asset", "--role", "--origin", "--provenance", "--seconds", "--status", "--prompt", "--model", "--aspect", "--resolution", "--max-credits", "--name", "--ref", "--wait-seconds", "--dir", "--props", "--props-file", "--frame", "--template", "--composition", "--title", "--body", "--link", "--file", "--provider", "--cookies", "--start-image", "--end-image", "--video-ref", "--audio-ref", "--duration", "--param", "--limit", "--a", "--b", "--hypothesis", "--as-of", "--brief", "--params", "--result", "--as", "--subject", "--target", "--width", "--note", "--content", "--content-file", "--locale", "--version", "--brand", "--mjml", "--reason", "--source", "--days", "--external", "--url", "--last", "--style", "--slot", "--digest", "--pages"]);
-  const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, "--json", "--ai", "--stop", "--video", "--image", "--raw"]);
+  const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, "--json", "--ai", "--stop", "--video", "--image", "--raw", "--no-brand"]);
   /**
    * Who did it, as recorded in an entry's history, on a version of the product pack and on a style pack: always "cli" or
    * "cli:<label>" from the CLI. `--as` is a label agents give themselves, not an identity, so it can never claim a reserved actor
@@ -1141,8 +1144,9 @@ export default async function plugin(bb: BbPluginApi) {
       return [kv.slice(0, i), kv.slice(i + 1)];
     }));
   // With --style the style (core/styles) writes the prompt and sets the model, aspect and parameters that the flags leave open,
-  // for the provider the scope generates with; the asset then records the style.
-  const specFrom = async (c: Core, args: string[], scope: Scope): Promise<{ spec: GenSpec; style?: StyleRef }> => {
+  // for the provider the scope generates with; the asset then records the style. Either way the look of the scope's company
+  // is put in front of the prompt (core.generation.branded) unless --no-brand is given; the asset records that too.
+  const specFrom = async (c: Core, args: string[], scope: Scope): Promise<{ spec: GenSpec; written: string; style?: StyleRef; look: LookRef | null; lookNote: string | null }> => {
     const model = val(args, "--model");
     if (model !== undefined && !MODEL_ID.test(model)) throw new Error(`Invalid --model "${model}"`);
     const params = pairs(args, "--param");
@@ -1156,15 +1160,15 @@ export default async function plugin(bb: BbPluginApi) {
     });
     const base: GenSpec = styled?.spec ?? { model: model ?? "nano_banana_pro", prompt: (val(args, "--prompt") ?? "").trim(), aspect: val(args, "--aspect"), params };
     if (base.prompt === "") throw new Error("Give --prompt <text>, or --style <id> with its slots (bb brandwise style list)");
-    if (base.prompt.length > MAX_PROMPT) throw new Error(`The prompt is ${base.prompt.length} characters, the limit is ${MAX_PROMPT}: shorten ${styled ? "the slot values" : "it"}`);
+    const branded = await c.generation.branded(scope, base.prompt, { brand: !args.includes("--no-brand"), styled: styled !== undefined });
     const one = (name: string) => { const v = val(args, name); return v === undefined ? undefined : mediaFile(v); };
     return {
       spec: {
-        ...base, resolution: val(args, "--resolution"),
+        ...base, prompt: branded.prompt, resolution: val(args, "--resolution"),
         refs: vals(args, "--ref").map(mediaFile), startImage: one("--start-image"), endImage: one("--end-image"),
         videoRefs: vals(args, "--video-ref").map(mediaFile), audioRefs: vals(args, "--audio-ref").map(mediaFile),
       },
-      style: styled?.style,
+      written: base.prompt, style: styled?.style, look: branded.look, lookNote: branded.note,
     };
   };
 
@@ -1190,7 +1194,7 @@ export default async function plugin(bb: BbPluginApi) {
       { name: "creative", summary: "Estimate, generate (Higgsfield) and collect creatives", usage: "bb brandwise creative models|model|cost|generate|collect ..." },
       { name: "style", summary: "Style recipes for creatives: list them or show one; add, switch on or off, or remove a style pack", usage: "bb brandwise style list|show|packs|add|review|enable|disable|remove ..." },
       { name: "product", summary: "Read, write, confirm or import the versioned Markdown product pack of a brand", usage: "bb brandwise product list|get|set|history|confirm|import ..." },
-      { name: "research", summary: "Read a company's public site into a digest to draft its product pack from", usage: "bb brandwise research site <url> ..." },
+      { name: "research", summary: "Read a company's public site into a digest, and take its look from a rendered page, to draft its product pack from", usage: "bb brandwise research site|look <url> ..." },
       { name: "video", summary: "Remotion video projects: seed, compositions, preview, render, collect", usage: "bb brandwise video seed|compositions|preview|render|collect ..." },
       { name: "mode", summary: "Show or re-apply the display mode (full, minimal)", usage: "bb brandwise mode [apply | set <name>]" },
     ],
@@ -1508,9 +1512,11 @@ export default async function plugin(bb: BbPluginApi) {
         if (area === "creative" && action === "cost") {
           const ref = val(args, "--campaign");
           const scope: Scope = ref ? (await c.campaigns.resolve(ref)).id : null;
-          const k = await costOf(c, (await specFrom(c, args, scope)).spec, scope, Number(val(args, "--max-credits") ?? NaN) || undefined);
+          const asked = await specFrom(c, args, scope);
+          const k = await costOf(c, asked.spec, scope, Number(val(args, "--max-credits") ?? NaN) || undefined);
           const within = k.credits <= k.cap && k.budgets.every((b) => b.spent + k.credits <= b.limit);
-          return reply({ ...k, withinLimit: within }, `${k.credits} ${k.unit} via ${k.provider} (limit per generation ${k.cap}; ${k.budgets.map((b) => `${b.name}: used ${b.spent} of ${b.limit} today`).join(", ")})`);
+          return reply({ ...k, withinLimit: within, look: asked.look, lookNote: asked.lookNote },
+            `${k.credits} ${k.unit} via ${k.provider} (limit per generation ${k.cap}; ${k.budgets.map((b) => `${b.name}: used ${b.spent} of ${b.limit} today`).join(", ")})${asked.lookNote === null ? "" : `\n${asked.lookNote}`}`);
         }
         if (area === "creative" && (action === "generate" || action === "collect")) {
           const wait = Math.min(Math.max(Number(val(args, "--wait-seconds") ?? 18) || 0, 0), 20); // MCP `run` stops a snippet after 25 s
@@ -1518,7 +1524,8 @@ export default async function plugin(bb: BbPluginApi) {
           if (action === "generate") {
             const role = (val(args, "--role") ?? "creative") as "creative" | "source";
             if (!["creative", "source"].includes(role)) return { exitCode: 1, stderr: usage };
-            const started = await startGeneration(c, { ...(await specFrom(c, args, await campaign())), campaign: val(args, "--campaign"), role, name: val(args, "--name") ?? null, maxCredits: Number(val(args, "--max-credits") ?? NaN) || undefined });
+            const { spec, written, style, look } = await specFrom(c, args, await campaign());
+            const started = await startGeneration(c, { spec, written, style, look, campaign: val(args, "--campaign"), role, name: val(args, "--name") ?? null, maxCredits: Number(val(args, "--max-credits") ?? NaN) || undefined });
             jobId = started.jobId;
           } else {
             jobId = positional(args.slice(2))[0] ?? "";
@@ -1531,7 +1538,7 @@ export default async function plugin(bb: BbPluginApi) {
         }
         if (area === "style") return styleCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
         if (area === "product") return productCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
-        if (area === "research") return researchCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
+        if (area === "research") return researchCli(c, action, args, { val, positional, reply, usage, actor: cliActor, render: () => chromeRender({ enginePath: cfg.emailEnginePath, chromePath: cfg.chromePath, videoEnginePath: cfg.videoEnginePath }) });
         if (area === "video") return video.cli(action, args, { val, positional, reply, usage });
         if (area === "editor") return editorCli.editor(action, args, { val, positional, reply, usage });
         if (area === "metrics") return metricsCli(action, args, { val, positional, reply, usage });

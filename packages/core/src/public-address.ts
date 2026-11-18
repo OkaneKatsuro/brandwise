@@ -1,7 +1,7 @@
-// Which IP addresses belong to the public internet. An address the core is asked to reach (a site to read, a repository of a
-// style pack) comes from outside, so it is only ever requested when it is public: everything else is this machine, the network
-// around it or a cloud's metadata service.
-import { BlockList, isIP } from "node:net";
+// Which IP addresses belong to the public internet, and the lookup that holds a connection to them. An address the core is asked
+// to reach (a site to read, what a rendered page fetches, a repository of a style pack) comes from outside, so it is only ever
+// requested when it is public: everything else is this machine, the network around it or a cloud's metadata service.
+import { BlockList, isIP, type LookupFunction } from "node:net";
 
 type Network = readonly [address: string, bits: number];
 
@@ -55,3 +55,23 @@ export function isPublicAddress(ip: string): boolean {
   if (version === 0) return false;
   return version === 4 ? !notPublic.check(ip, "ipv4") : publicV6.check(ip, "ipv6") && !notPublic.check(ip, "ipv6");
 }
+
+/** Every address of a host name. */
+export type Resolve = (host: string) => Promise<{ address: string; family: number }[]>;
+
+/** A name that resolves to an address that is not public. Its own class, so that this refusal reads differently from a failure. */
+export class NotPublic extends Error {}
+
+/**
+ * The `lookup` of a connection to a name that came from outside: resolves the name, refuses the connection when any answer is
+ * not public, and hands back the answers it checked. What was checked is what is connected to, so a name that answers
+ * differently a moment later gains nothing.
+ */
+export const publicOnly = (resolve: Resolve): LookupFunction => (host, options, done) => {
+  resolve(host).then((answers) => {
+    const hidden = answers.find((a) => !isPublicAddress(a.address));
+    if (hidden !== undefined) throw new NotPublic(`${host} resolves to ${hidden.address}, which is not a public address`);
+    if (answers.length === 0) throw new Error(`${host} has no address`);
+    return answers;
+  }).then((answers) => (options.all ? done(null, answers) : done(null, answers[0].address, answers[0].family)), (cause) => done(cause, []));
+};

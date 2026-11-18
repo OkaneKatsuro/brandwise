@@ -74,7 +74,7 @@ Status: **exists** = done in the repo, **plan** = needs to be built, **external*
 | 14 | `lint_claims` | read | 1 | deterministic check of text against `claims.md` | plan |
 | 15 | `draft_post` | draft | 1 | saves a post draft, runs lint right away | plan |
 | 16 | `draft_page` | draft | 1 | page from a template and a data row (pSEO) | plan |
-| 17 | `generate_media` | draft | 2 over budget | image or video (Higgsfield) from a prompt or from a style and its slots, costs credits | **exists** as `bb brandwise creative cost\|generate\|collect` (per-call and daily limit) |
+| 17 | `generate_media` | draft | 2 over budget | image or video (Higgsfield) from a prompt or from a style and its slots, costs credits. Code puts the company's look (its confirmed `design.json`) in front of the prompt | **exists** as `bb brandwise creative cost\|generate\|collect` (per-call and daily limit; `--no-brand` leaves the look out) |
 | 18 | `log_hypothesis` | write | 1 | writes a hypothesis to `experiments` | plan |
 | 19 | `schedule_item` | write | 1–3 by type | creates a calendar entry | plan |
 | 20 | `reschedule_item` | write | 1–2 | changes the time or cancels an entry | plan |
@@ -83,6 +83,7 @@ Status: **exists** = done in the repo, **plan** = needs to be built, **external*
 | 23 | `save_asset` | draft | 1 | saves a file to storage by hash and writes an `asset` record | plan |
 | 24 | `get_styles` | read | 1 | style recipes for creatives: what each is for, its slots, aspects and channels; the built-in ones and those of the style packs a person switched on (`<pack>/<id>`) | **exists** as `bb brandwise style list\|show`, and `style packs` for the packs. Adding, switching on and removing a pack are a person's commands, not tools: `style add\|enable\|remove`. `style disable` only takes styles away; an agent runs it when asked |
 | 25 | `research_site` | draft | 1 | reads a company's public site (plain HTML, public addresses only, `robots.txt` honoured, no browser), keeps each page as a `reference` asset and returns a bounded digest of quoted material to draft the product pack from | **exists** as `bb brandwise research site` (see `context-styles-map.md`, step 2) |
+| 26 | `research_look` | draft | 1 | renders one public page of a company in a headless Chrome (the page's scripts off; the network only through a proxy that refuses everything but public addresses on ports 80 and 443; `robots.txt` honoured), keeps a picture of the top of the page as a `reference` asset and returns candidates taken by code: colours by where the page uses them, font families, logo addresses, each with how it was found. The agent proposes `design.md` and `design.json` from them; a person confirms | **exists** as `bb brandwise research look` (see `context-styles-map.md`, step 3); needs the optional engine `packages/email-engine` |
 
 `schedule_item`: a draft without publishing is tier 1, publishing to an account is tier 2, claims about price, warranty or subsidies and a new channel are tier 3.
 

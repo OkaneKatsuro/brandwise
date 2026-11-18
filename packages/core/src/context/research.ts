@@ -1,13 +1,17 @@
-// Reading a company's site, the part that does I/O (docs/context-styles-map.md, step 2). The address comes from a person or from
-// text an agent read, so every request is fenced: http and https only, public addresses only and checked on the address that is
-// actually connected to, redirects followed by hand through the same checks, robots.txt honoured, one time limit and one size
-// limit per page, one request at a time. No browser: a page is plain HTML that is parsed, and nothing of it runs.
-// The network is two functions that are handed in, so the fence is tested without one.
+// Research for a company's pack, the part that does I/O (docs/context-styles-map.md, steps 2 and 3): reading its site and
+// rendering one page for its look. The address comes from a person or from text an agent read, so every request is fenced:
+// http and https only, public addresses only and checked on the address that is actually connected to, redirects followed by
+// hand through the same checks, robots.txt honoured, one time limit and one size limit per page, one request at a time. A site
+// is read without a browser: a page is plain HTML that is parsed, and nothing of it runs. The look needs a browser, which
+// fetches whatever the page names: it gets no way to the network but a proxy with the same fence (proxy.ts).
+// The network and the browser are handed in, so the fence is tested without either.
 import { lookup as dnsLookup } from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
 import type { LookupFunction } from "node:net";
-import { isPublicAddress } from "../public-address.ts";
+import { NotPublic, publicOnly, type Resolve } from "../public-address.ts";
+import type { RenderedPage } from "./look.ts";
+import { startProxy, type Refusals } from "./proxy.ts";
 import {
   addressProblem, decodeHtml, DEFAULT_PAGES, headProblem, pagesProblem, readPage, redirectTarget, robotsAllow, robotsRules, siteLinks, USER_AGENT,
   type Head, type Page, type RobotsRule,
@@ -17,14 +21,15 @@ import {
 const PAGE_TIMEOUT_MS = 10_000;
 const MAX_BYTES = 2_000_000;
 const MAX_REDIRECTS = 5;
+/** A render gets this long in all, from the start of the browser to the picture. */
+const RENDER_TIMEOUT_MS = 30_000;
 
 /** A reply: its head, and its body when the caller wanted it. `truncated`: the body was longer than allowed and reading stopped. */
 type Reply = Head & { body: Uint8Array; truncated: boolean };
 
 /** The network as the reader uses it. */
 export type Net = {
-  /** Every address of a host name. */
-  resolve: (host: string) => Promise<{ address: string; family: number }[]>;
+  resolve: Resolve;
   /**
    * One GET, redirects not followed. A host name is resolved with `lookup` and the connection goes to what it hands back. The
    * body is read only when `wants` says so after the head, and only up to `maxBytes`. Rejects with an error named TimeoutError
@@ -61,49 +66,28 @@ export const nodeNet: Net = {
   },
 };
 
-/** A name that resolves to an address that is not public. Its own class, so that this refusal reads differently from a failure. */
-class NotPublic extends Error {}
-
-/**
- * The `lookup` of every request: resolves the name, refuses the request when any answer is not public, and hands back the
- * answers it checked. What was checked is what is connected to, so a name that answers differently a moment later gains nothing.
- */
-const publicOnly = (resolve: Net["resolve"]): LookupFunction => (host, options, done) => {
-  resolve(host).then((answers) => {
-    const hidden = answers.find((a) => !isPublicAddress(a.address));
-    if (hidden !== undefined) throw new NotPublic(`${host} resolves to ${hidden.address}, which is not a public address`);
-    if (answers.length === 0) throw new Error(`${host} has no address`);
-    return answers;
-  }).then((answers) => (options.all ? done(null, answers) : done(null, answers[0].address, answers[0].family)), (cause) => done(cause, []));
-};
-
 /** Why a request got no reply, as the end of a sentence about the address. */
 const failure = (cause: unknown): string =>
   cause instanceof NotPublic ? cause.message
     : cause instanceof Error && cause.name === "TimeoutError" ? `no answer within ${PAGE_TIMEOUT_MS / 1000} s`
     : `cannot be reached (${(cause instanceof Error ? cause.message : String(cause)).slice(0, 200)})`;
 
-/** What one read of a site gave: the pages read, the first being the one that was asked for, and the addresses it did not read. */
-type SiteRead = { site: string; pages: Page[]; skipped: { url: string; reason: string }[] };
-
-/**
- * Reads the page at `address` and the pages of the same site that its navigation, header and footer link to, at most `limit`
- * addresses in all. A page that cannot be read is skipped with the reason; when it is the page that was asked for, the read
- * fails with it. `site` is where that page lives, after its redirects.
- */
-export async function readSite(net: Net, address: string, limit = DEFAULT_PAGES): Promise<SiteRead> {
-  const tooMany = pagesProblem(limit);
-  if (tooMany !== null) throw new Error(tooMany);
+/** The address a person or an agent gave, as the page to start from: without its fragment. */
+function startOf(address: string): URL {
   let start: URL;
   try { start = new URL(address); } catch { throw new Error(`"${address}" is not an address: give the whole address of a page, like https://example.com`); }
   start.hash = "";
+  return start;
+}
+
+/**
+ * The GET of one read, with its redirects. Every hop passes the fence before it is requested: the address itself, the site it
+ * has to stay on (`within`), that site's robots.txt (`robots`), and the name's addresses when the connection is made.
+ */
+function fenced(net: Net) {
   const lookup = publicOnly(net.resolve);
   const robots = new Map<string, Promise<RobotsRule[] | string>>();
 
-  /**
-   * One GET with its redirects. Every hop passes the fence before it is requested: the address itself, the site it has to stay
-   * on (`within`), that site's robots.txt (`robots`), and the name's addresses when the connection is made.
-   */
   async function get(from: URL, fence: { robots: boolean; within?: string }, wants: (head: Head) => boolean): Promise<{ url: URL; reply: Reply } | { problem: string }> {
     let deadline: number | undefined;
     for (let url = from, hops = 0; ; hops++) {
@@ -138,6 +122,22 @@ export async function readSite(net: Net, address: string, limit = DEFAULT_PAGES)
     return typeof known === "string" ? known : robotsAllow(known, url.pathname + url.search) ? null : "robots.txt disallows it";
   }
 
+  return get;
+}
+
+/** What one read of a site gave: the pages read, the first being the one that was asked for, and the addresses it did not read. */
+type SiteRead = { site: string; pages: Page[]; skipped: { url: string; reason: string }[] };
+
+/**
+ * Reads the page at `address` and the pages of the same site that its navigation, header and footer link to, at most `limit`
+ * addresses in all. A page that cannot be read is skipped with the reason; when it is the page that was asked for, the read
+ * fails with it. `site` is where that page lives, after its redirects.
+ */
+export async function readSite(net: Net, address: string, limit = DEFAULT_PAGES): Promise<SiteRead> {
+  const tooMany = pagesProblem(limit);
+  if (tooMany !== null) throw new Error(tooMany);
+  const start = startOf(address), get = fenced(net);
+
   async function page(from: URL, within?: string): Promise<{ url: URL; html: string; page: Page } | { problem: string }> {
     const got = await get(from, { robots: true, within }, (head) => headProblem(head) === null);
     if ("problem" in got) return got;
@@ -157,4 +157,43 @@ export async function readSite(net: Net, address: string, limit = DEFAULT_PAGES)
     else { read.add(next.url.href); pages.push(next.page); }
   }
   return { site, pages, skipped };
+}
+
+/**
+ * A browser, as far as the look needs one: it renders the page at `url` with the page's scripts off, reaching the network only
+ * through the proxy on `proxyPort` of 127.0.0.1 (this machine included, so nothing goes around it), and hands back a picture of
+ * the top of the page with what it computed for the page's elements. When `timeoutMs` pass first it stops, and rejects with
+ * an error named TimeoutError. Either way it settles only when what it started is gone.
+ */
+export type Render = (page: { url: string; proxyPort: number; timeoutMs: number }) => Promise<{ png: Uint8Array; page: RenderedPage }>;
+
+/** A page as it was rendered: the picture, what the browser computed, and the connections the page asked for that were refused. */
+type Rendered = { png: Uint8Array; page: RenderedPage; refused: Refusals };
+
+/**
+ * Renders the page at `address` for the company's look. Before a browser starts, the address passes the fence a read of the
+ * site passes, redirects and robots.txt included, and has to be a page of HTML. The browser then renders where that led, behind
+ * a proxy that lives for this one render and is closed whatever happens. Where the browser ended is `page.url`; it has to be
+ * an address that may be read as well.
+ */
+export async function renderPage(net: Net, render: Render, address: string): Promise<Rendered> {
+  const start = startOf(address);
+  const notRendered = (why: string) => new Error(`${start.href} was not rendered: ${why}`);
+  const got = await fenced(net)(start, { robots: true }, () => false);
+  if ("problem" in got) throw notRendered(got.problem);
+  const problem = headProblem(got.reply);
+  if (problem !== null) throw notRendered(got.url.href === start.href ? problem : `redirects to ${got.url.href}: ${problem}`);
+
+  const proxy = await startProxy(net.resolve);
+  try {
+    const rendered = await render({ url: got.url.href, proxyPort: proxy.port, timeoutMs: RENDER_TIMEOUT_MS }).catch((cause: unknown) => {
+      throw notRendered(cause instanceof Error && cause.name === "TimeoutError" ? `no picture within ${RENDER_TIMEOUT_MS / 1000} s` : (cause instanceof Error ? cause.message : String(cause)).slice(0, 300));
+    });
+    const ended = URL.parse(rendered.page.url);
+    const astray = ended === null ? "that is not an address" : addressProblem(ended);
+    if (astray !== null) throw notRendered(`the browser ended on ${JSON.stringify(rendered.page.url.slice(0, 200))}: ${astray}`);
+    return { ...rendered, refused: proxy.refused() };
+  } finally {
+    await proxy.close();
+  }
 }
