@@ -14,6 +14,7 @@ import { agentContract, createAgents } from "./agents.ts";
 import { productCli } from "./product.ts";
 import { researchCli } from "./research-cli.ts";
 import { createVideo, videoContract } from "./video.ts";
+import { createMapRpc, mapContract } from "./map.ts";
 import { createEmailTemplates, templatesContract } from "./email-templates.ts";
 import { sleep, slug } from "./util.ts";
 import { connectorsFrom, runDue, SHORTENED_CHANNELS, type ScopedTokens } from "./core/publish.ts";
@@ -176,6 +177,7 @@ export const rpcContract = defineRpcContract({
   },
   ...videoContract,
   ...templatesContract,
+  ...mapContract,
   ...agentContract,
   settings_get: { input: z.null(), output: settingsViewSchema },
   config_get: { input: z.object({ campaignId: z.string().nullable() }), output: configViewSchema },
@@ -351,7 +353,9 @@ export default async function plugin(bb: BbPluginApi) {
   // The editor-in-chief regulator (rails, signals, experiments, journal, tasks) and the development clock.
   const regulator = core !== null && metrics !== null ? createRegulator({ core, metrics, library: () => emailTemplates.library() }) : null;
   const editorCli = createEditorCli({ core: need, regulator: () => regulator });
-  const metricsCli = createMetricsCli({ core: need, metrics: () => metrics, links: () => links, now: async () => (regulator ? regulator.clock.now() : new Date()) });
+  /** The moment numbers are read as of: the regulator's clock, which is the development clock while a simulated world runs. */
+  const now = async () => (regulator ? regulator.clock.now() : new Date());
+  const metricsCli = createMetricsCli({ core: need, metrics: () => metrics, links: () => links, now });
   /** Every publishing connector that is switched on. A channel without one waits as "Publish by hand". */
   // Accounts connected over OAuth (TikTok, YouTube): their refresh tokens are scoped secret settings of the campaign (docs/channels.md).
   const tokens: ScopedTokens = {
@@ -617,6 +621,7 @@ export default async function plugin(bb: BbPluginApi) {
     campaigns_list: async () => ({ campaigns: await need().campaigns.list() }),
     ...video.rpc,
     ...emailTemplates.rpc,
+    ...createMapRpc({ need, metrics: () => metrics, now, thumbUrl }),
     ...agents,
     calendar_list: async () => ({ entries: await need().calendar.list() }),
     calendar_add: async (input) => {

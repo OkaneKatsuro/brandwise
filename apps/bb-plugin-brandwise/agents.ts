@@ -1,11 +1,11 @@
 // Screen agents: every BrandWise page can start one bb thread that knows which page (and, where the route says so, which
-// project) the user is looking at. To give a new page an agent, add it to SCREENS and, if it needs more than the page name,
-// a context function (see `video.agentContext`).
+// project or company) the user is looking at. To give a new page an agent, add it to SCREENS and, if it needs more than the page
+// name, a context function (see `video.agentContext`, or `mapSpec` below for one that only needs the core).
 import { z } from "zod";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { Core } from "./core/index.ts";
 
-export const SCREENS = ["calendar", "creatives", "campaigns", "video", "email"] as const;
+export const SCREENS = ["calendar", "creatives", "campaigns", "video", "email", "map"] as const;
 export type Screen = (typeof SCREENS)[number];
 
 export const agentContract = {
@@ -25,7 +25,7 @@ const COMMON = [
 ].join(" ");
 const WAIT = "For now just look at the current state, say in one sentence what you see, and wait for instructions.";
 
-const PAGE_BRIEF: Record<Exclude<Screen, "video" | "email">, string> = {
+const PAGE_BRIEF: Record<Exclude<Screen, "video" | "email" | "map">, string> = {
   calendar: "The user is on the Calendar screen (the content plan: posts, e-mails, pages and their approval). You help plan and edit calendar entries (`bb brandwise calendar ...`).",
   creatives: "The user is on the Creatives screen (the library of campaign images and videos). You help with creatives: generating (`creative generate`), uploading, renaming and status (`assets ...`).",
   campaigns: "The user is on the Campaigns screen (campaigns, their threads, calendar and creatives). You help create and manage campaigns (`bb brandwise campaign ...`). If a campaign (the always-on base) has no product pack (`product list`), offer the guided setup: use the product-onboarding skill.",
@@ -42,9 +42,30 @@ export function createAgents(deps: {
 }) {
   const { bb } = deps;
 
+  /**
+   * The Map screen shows one company, named by its route (`map/<campaign id>`, any campaign of the company): each company has its
+   * own agent thread, linked to the company.
+   */
+  async function mapSpec(subPath: string): Promise<AgentSpec | null> {
+    const campaigns = await deps.need().campaigns.list();
+    const open = campaigns.find((c) => c.id === decodeURIComponent(subPath.split("/")[0]));
+    const company = open && campaigns.find((c) => c.id === open.rootId);
+    if (!company) return null;
+    return {
+      key: `map/${company.id}`, cwd: null, campaignId: company.id,
+      prompt: [
+        COMMON,
+        `The user is on the Map screen and looks at the company "${company.name}" (campaign id ${company.id}). The map shows where everything of that company came from and where it went: the sites its product pack was drawn from, the pack, its campaigns, their creatives, the posts and what the posts brought. It only shows; nothing is changed on it.`,
+        `You help with what they see there, always for this company: the pack (\`product list --campaign ${company.id}\`; when files are missing, offer the guided setup of the product-onboarding skill, which starts with \`research site <url>\`), its creatives and calendar entries, and the numbers of its posts (\`metrics virality --campaign ${company.id}\`).`,
+        WAIT,
+      ].join("\n\n"),
+    };
+  }
+
   async function spec(screen: Screen, subPath: string): Promise<AgentSpec | null> {
     if (screen === "video") return deps.video(subPath);
     if (screen === "email") return deps.email(subPath);
+    if (screen === "map") return mapSpec(subPath);
     return { key: screen, cwd: null, campaignId: null, prompt: [COMMON, PAGE_BRIEF[screen], WAIT].join("\n\n") };
   }
 
