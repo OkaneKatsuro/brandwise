@@ -68,7 +68,7 @@ Status: **exists** = done in the repo, **plan** = needs to be built, **external*
 | 8 | `download_video` | read | 1 | downloads a video, returns the path and metadata | **exists** (`tools/video-dl.sh`) |
 | 9 | `transcribe_media` | read | 1 | audio transcription (Whisper) | plan |
 | 10 | `get_geo_citations` | read | 1 | citations in AI answers | external |
-| 11 | `get_social_metrics` | read | 1 | performance of published posts | plan |
+| 11 | `get_social_metrics` | read | 1 | performance of published posts | **exists** as `bb brandwise metrics entry\|campaign\|virality\|styles` (numbers, and whether a post spread beyond what is usual for the company); a channel has numbers once a source measures it, see `analytics.md` |
 | 12 | `get_calendar` | read | 1 | future and past calendar entries | plan |
 | 13 | `get_learnings` | read | 1 | library of learnings and experiments | plan |
 | 14 | `lint_claims` | read | 1 | deterministic check of text against `claims.md` | plan |

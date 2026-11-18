@@ -2,7 +2,7 @@
 // The service itself lives in packages/core/src/metrics; this file parses arguments and prints.
 import type { Core } from "./core/index.ts";
 import type { Links } from "./core/links/index.ts";
-import { METRIC_NAMES, type EntryMetrics, type Metrics } from "./core/metrics/index.ts";
+import { METRIC_NAMES, type EntryMetrics, type EntryVirality, type Metrics, type StyleVirality } from "./core/metrics/index.ts";
 
 type Io = { val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string };
 
@@ -18,6 +18,18 @@ const fmt = (m: EntryMetrics, measured: boolean, title?: string) => {
   return `${m.entryId}  ${m.channel.padEnd(9)} started ${m.startedAt?.slice(0, 16) ?? "not yet"}  ${have.length ? have.join(", ") : none}` +
     `${m.values.exposures !== undefined ? `  (click rate ${pct(ratio(m, "clicks"))})` : ""}${title ? `  "${title}"` : ""}`;
 };
+/** How many times the account's usual number: "x4.00". */
+const times = (v: number | null) => (v === null ? "n/a" : `x${v.toFixed(2)}`);
+/** How long ago the entry reached its audience: "40m", "5h", "3d". */
+const ageOf = (startedAt: string, asOf: Date) => {
+  const minutes = Math.floor((asOf.getTime() - Date.parse(startedAt)) / 60_000);
+  return minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1440)}d`;
+};
+const fmtVirality = (v: EntryVirality, asOf: Date) =>
+  `${v.entryId}  ${v.channel.padEnd(9)} age ${ageOf(v.startedAt, asOf).padEnd(4)} exposures ${String(v.exposures ?? "n/a").padStart(7)}  1h ${times(v.ages["1h"].ratio).padEnd(7)} 24h ${times(v.ages["24h"].ratio).padEnd(7)} ` +
+  `share rate ${pct(v.rates.share).padEnd(8)} ${v.verdict.padEnd(7)}  style ${v.style}  "${v.title}"`;
+const fmtStyle = (s: StyleVirality) =>
+  `${s.style.padEnd(24)} ${String(s.entries).padStart(4)} entries  median ratio ${times(s.medianRatio).padEnd(7)} median share rate ${pct(s.medianShareRate).padEnd(8)} ${s.viral} viral`;
 
 export function createMetricsCli(deps: { core: () => Core; metrics: () => Metrics | null; links: () => Links | null; now: () => Promise<Date> }) {
   return async function metricsCli(action: string | undefined, args: string[], io: Io) {
@@ -46,6 +58,18 @@ export function createMetricsCli(deps: { core: () => Core; metrics: () => Metric
       const total = (k: (typeof METRIC_NAMES)[number]) => { const have = numbers.filter((x) => x.values[k] !== undefined); return have.length ? `${k} ${have.reduce((t, x) => t + x.values[k]!, 0)} (${have.length} entries)` : null; };
       const funnel = (["exposures", "reach", "clicks", "visits", "leads", "orders", "revenue", "spend"] as const).map(total).filter(Boolean).join(", ");
       return reply(numbers, `${numbers.map((x, i) => fmt(x, m.sourcesFor(x.channel).length > 0, entries[i].title)).join("\n")}\nTotal: ${funnel || "no numbers yet"}`);
+    }
+    if (action === "virality") {
+      const c = await deps.core().campaigns.resolve(val(args, "--campaign"));
+      const channel = val(args, "--channel"), last = val(args, "--last");
+      if (last !== undefined && !(Number.isInteger(Number(last)) && Number(last) > 0)) return { exitCode: 1, stderr: "--last is a positive whole number" };
+      const rows = await m.virality(c, asOf, { channel, last: Number(last ?? 20) });
+      return reply(rows, rows.map((r) => fmtVirality(r, asOf)).join("\n") || `Nothing published in ${c.name}${channel ? ` on ${channel}` : ""} yet.`);
+    }
+    if (action === "styles") {
+      const c = await deps.core().campaigns.resolve(val(args, "--campaign"));
+      const rows = await m.styles(c, asOf);
+      return reply(rows, rows.map(fmtStyle).join("\n") || `Nothing published in ${c.name} yet.`);
     }
     if (action === "links") {
       const id = positional(args.slice(2))[0];

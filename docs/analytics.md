@@ -74,6 +74,27 @@ Not planned: LLM or token cost accounting (subscriptions make it meaningless).
 - Settings > Ads: Meta access token (a system-user token with `ads_read`) and the Graph API version (default `v23.0`, which Meta retires after about two years).
 - `metrics campaign`'s funnel adds reach and spend.
 
+## Virality by rule
+
+Step 8 of `context-styles-map.md`. Whether an entry spread is computed by code (`metrics/virality.ts`, pure), never judged by a model, and only against the company's own history: ten thousand views is a hit for a small account and a failure for a large one.
+
+- **Ages.** An entry's numbers are read 1 hour, 24 hours and 7 days after it reached its audience, each "as of" that moment. An entry younger than an age has no number at it.
+- **Baseline.** The median of the same number at the same age over the previous 20 published entries of the company on the same channel. The company is the always-on base with every campaign under it. A 24-hour number only ever meets 24-hour numbers, never what an older entry has by now. With fewer than 5 earlier entries that have the number there is no baseline.
+- **Ratio** = exposures / baseline, per age. The ratio at 1 hour is the early signal; the verdict is taken at 24 hours:
+
+  | Verdict | Rule |
+  |---|---|
+  | `viral` | ratio at least the company's viral ratio (3) and a share rate at least the baseline share rate: reach that was bought or accidental does not count |
+  | `above` | ratio at least 1.5 |
+  | `typical` | ratio from 0.67 |
+  | `below` | ratio under 0.67 |
+  | `unknown` | no exposures at 24 hours (not measured, or the entry is younger than that), or no baseline |
+
+- **Rates** at 24 hours: share rate = shares / exposures, save rate = saves / exposures, engagement rate = (reactions + comments + shares + saves) / exposures. An unknown input gives an unknown rate, never a smaller one: on a platform that reports no saves the engagement rate is unknown.
+- The viral ratio is the scoped setting `virality.viralRatio`, read from the company: `bb brandwise config set virality.viralRatio 4 --campaign <company>`. A value on a campaign under the company is not used. The other thresholds are constants of the module.
+- CLI: `bb brandwise metrics virality [--campaign <c>] [--channel <ch>] [--last 20] [--as-of <ISO>]` lists the campaign's entries, newest first: channel, age, exposures now, the ratio at 1 hour and at 24 hours, the share rate at 24 hours, the verdict and the style. `metrics styles [--campaign <c>] [--as-of <ISO>]` groups every entry of the campaign by style: entries, median ratio, median share rate, how many went viral. The style is `provenance.style.id` of the entry's creative; entries without one are `none`. `--json` adds the baselines, the 7-day numbers and the other rates.
+- A pull source is asked once an hour, so the number "at 1 hour" is the last one stored before that moment: up to an hour old, and unknown when the first pull came later.
+
 Notes on step 1:
 - The actor is a label, not a verified identity: `ui` is a person on a page, `cli` or `cli:<label>` the command line (`--as <label>`), `auto` the tier-1 approval, `scheduler` publishing. The CLI refuses `--as ui`, `auto`, `scheduler` and `unknown`.
 - Send-back reasons are a closed list: claims, facts, tone, brand, visual, legal, typo, offer, other. The approval dialog offers them; the CLI takes `--reason`.
