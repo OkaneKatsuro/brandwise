@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { telegram } from "../connector-telegram.ts";
 import type { PublishInput } from "../publish.ts";
-import { clientAddress, codeOf, isBot, newLinkId, replaceUrls, verifyCode } from "./domain.ts";
+import { clientAddress, codeOf, isBot, newLinkId, rateLimiter, replaceUrls, verifyCode } from "./domain.ts";
 import { createLinks } from "./index.ts";
 
 const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
@@ -29,6 +29,29 @@ test("the client address is the one our proxy appended, never what the client wr
   assert.equal(clientAddress("203.0.113.5"), "203.0.113.5");
   assert.equal(clientAddress(undefined), null);
   assert.equal(clientAddress(""), null);
+  assert.equal(clientAddress("unknown"), null, "not an address");
+  assert.equal(clientAddress("203.0.113.5:51234"), "203.0.113.5", "a proxy that adds the port");
+  assert.equal(clientAddress("::ffff:203.0.113.5"), "203.0.113.5", "IPv4 written as IPv6");
+});
+
+test("an IPv6 client is its /64, whichever address of it the request used", () => {
+  const net = "2001:db8:12:3400::/64";
+  for (const ip of ["2001:db8:12:3400::1", "2001:0DB8:0012:3400:aaaa:bbbb:cccc:dddd", "[2001:db8:12:3400::9]:443", "2001:db8:12:3400::9%en0"])
+    assert.equal(clientAddress(`6.6.6.6, ${ip}`), net, ip);
+  assert.equal(clientAddress("2001:db8:12:3401::1"), "2001:db8:12:3401::/64", "the next network is someone else");
+  assert.equal(clientAddress("::1"), "0:0:0:0::/64");
+  assert.equal(clientAddress("2001:db8::"), "2001:db8:0:0::/64");
+});
+
+test("request limit: per key and window, the rest shared, and never more keys than the cap", () => {
+  const limited = rateLimiter({ windowMs: 1000, perKey: 2, shared: 3, maxKeys: 2 });
+  assert.deepEqual([limited("a", 0), limited("a", 1), limited("a", 2)], [false, false, true], "the third request of a key in one window");
+  assert.equal(limited("b", 3), false, "another key has its own count");
+  assert.deepEqual([limited(null, 4), limited("c", 5), limited("d", 6), limited("e", 7)], [false, false, false, true],
+    "with the table full, new keys are counted with the requests that have no key: the fourth of them is over");
+  assert.equal(limited("b", 8), false, "a key already followed keeps its own count");
+  assert.deepEqual([limited("c", 2000), limited("c", 2001), limited("c", 2002)], [false, false, true],
+    "once the old windows are over the table has room again: a key that had to share now has its own count");
 });
 
 test("replaceUrls keeps sentence punctuation outside the link", async () => {

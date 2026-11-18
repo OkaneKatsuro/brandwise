@@ -4,7 +4,7 @@ import type pg from "pg";
 import type { MetricsSource, Snapshot } from "../metrics/domain.ts";
 import { codeOf, isBot, MAX_VISITORS_PER_SOURCE, newLinkId, sourceOf, verifyCode, visitorOf } from "./domain.ts";
 
-export { clientAddress, isBot, replaceUrls } from "./domain.ts";
+export { clientAddress, isBot, rateLimiter, REDIRECT_LIMIT, replaceUrls } from "./domain.ts";
 
 export function createLinks(deps: {
   pool: pg.Pool;
