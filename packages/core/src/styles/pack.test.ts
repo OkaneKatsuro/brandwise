@@ -290,8 +290,8 @@ test("fetchRepository: git is held to https, and the temporary folder is gone wh
   const before = process.env.TMPDIR;
   process.env.TMPDIR = root; // where the function makes its temporary folder, so that it can be seen to be gone
   try {
-    // an address of the range kept for examples: public as far as the check goes, and git refuses the protocol before it connects
-    await assert.rejects(fetchRepository("http://192.0.2.1/extras.git"), /^Error: Could not fetch http:\/\/192\.0\.2\.1\/extras\.git: fatal: transport 'http' not allowed\. A pack's repository is fetched over https without signing in: check the address and that the repository is public\.$/);
+    // a public address, so the check lets it through: git then refuses the protocol before it connects to anything
+    await assert.rejects(fetchRepository("http://8.8.8.8/extras.git"), /^Error: Could not fetch http:\/\/8\.8\.8\.8\/extras\.git: fatal: transport 'http' not allowed\. A pack's repository is fetched over https without signing in: check the address and that the repository is public\.$/);
     assert.deepEqual(readdirSync(root), []);
   } finally {
     if (before === undefined) delete process.env.TMPDIR;

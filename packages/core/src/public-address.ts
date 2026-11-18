@@ -1,5 +1,6 @@
-// Which IP addresses belong to the public internet. The address of a site to read comes from outside, so it is only ever
-// requested when it is public: everything else is this machine, the network around it or a cloud's metadata service.
+// Which IP addresses belong to the public internet. An address the core is asked to reach (a site to read, a repository of a
+// style pack) comes from outside, so it is only ever requested when it is public: everything else is this machine, the network
+// around it or a cloud's metadata service.
 import { BlockList, isIP } from "node:net";
 
 type Network = readonly [address: string, bits: number];

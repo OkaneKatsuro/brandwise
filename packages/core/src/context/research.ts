@@ -7,7 +7,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
 import type { LookupFunction } from "node:net";
-import { isPublicAddress } from "./public-address.ts";
+import { isPublicAddress } from "../public-address.ts";
 import {
   addressProblem, decodeHtml, DEFAULT_PAGES, headProblem, pagesProblem, readPage, redirectTarget, robotsAllow, robotsRules, siteLinks, USER_AGENT,
   type Head, type Page, type RobotsRule,

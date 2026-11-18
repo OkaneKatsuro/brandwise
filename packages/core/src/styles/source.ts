@@ -7,7 +7,7 @@ import { lstat, mkdtemp, opendir, readFile, rm } from "node:fs/promises";
 import { isIP } from "node:net";
 import { devNull, tmpdir } from "node:os";
 import { join } from "node:path";
-import { isPrivateAddress } from "../email/templates/adapters/fetch-link-checker.ts";
+import { isPublicAddress } from "../public-address.ts";
 import { plain } from "./domain.ts";
 import { MAX_FILE_BYTES, type PackEntry } from "./pack.ts";
 
@@ -81,7 +81,7 @@ const git = (args: string[]) =>
 async function publicHost(url: URL): Promise<string[]> {
   const host = url.hostname.replace(/^\[|\]$/g, ""); // an IPv6 address comes in brackets
   const found = await lookup(host, { all: true }).catch(() => []);
-  if (found.some((a) => isPrivateAddress(a.address))) throw new Error(`${url.hostname} is this machine or a host of a private network: a pack is fetched from a public git host only. Give the pack's public https address, or the full path of a folder that holds it.`);
+  if (found.some((a) => !isPublicAddress(a.address))) throw new Error(`${url.hostname} is this machine or a host of a private network: a pack is fetched from a public git host only. Give the pack's public https address, or the full path of a folder that holds it.`);
   if (isIP(host) || found.length === 0) return [];
   const { address, family } = found[0];
   return ["-c", `http.curloptResolve=${host}:${url.port || "443"}:${family === 6 ? `[${address}]` : address}`];

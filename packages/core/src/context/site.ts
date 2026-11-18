@@ -4,7 +4,7 @@
 // stores what was read. All of it works on text a stranger controls, so every size is bounded and nothing of a page is ever run.
 import { isIP } from "node:net";
 import { html as HTML, parse, type DefaultTreeAdapterMap } from "parse5";
-import { isPublicAddress } from "./public-address.ts";
+import { isPublicAddress } from "../public-address.ts";
 
 type Node = DefaultTreeAdapterMap["node"];
 type Element = DefaultTreeAdapterMap["element"];
