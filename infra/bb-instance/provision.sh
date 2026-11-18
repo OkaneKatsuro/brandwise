@@ -88,7 +88,7 @@ apply() {
    # the public address of the short-link redirect (docs/analytics.md, step 3); unset = links in posts are not shortened
    if [ -n "${LINKS_BASE_URL:-}" ]; then cfg linksBaseUrl "$LINKS_BASE_URL"; fi
    # optional video engine (agent-written Remotion templates); empty until its npm deps are installed
-   if [ -f "$root/packages/video-remotion/node_modules/.package-lock.json" ]; then cfg videoEnginePath "$root/packages/video-remotion"; fi
+   if [ -d "$root/packages/video-remotion/node_modules/remotion" ]; then cfg videoEnginePath "$root/packages/video-remotion"; fi
    if [ -d "$root/packages/email-engine/node_modules/mjml" ]; then cfg emailEnginePath "$root/packages/email-engine"; fi
    # the mode is a user choice in Settings: profile.env only seeds it, unless BW_MODE_ENFORCE=1
    if [ "$first_install" = 1 ] || [ "${BW_MODE_ENFORCE:-0}" = 1 ]; then cfg mode "${BW_MODE:-full}"; fi)
