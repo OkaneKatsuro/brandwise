@@ -7,7 +7,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
 import type { LookupFunction } from "node:net";
-import { isPublicAddress } from "../public-address.ts";
+import { NotPublic, publicOnly, type Resolve } from "../public-address.ts";
 import {
   addressProblem, decodeHtml, DEFAULT_PAGES, headProblem, pagesProblem, readPage, redirectTarget, robotsAllow, robotsRules, siteLinks, USER_AGENT,
   type Head, type Page, type RobotsRule,
@@ -23,8 +23,7 @@ type Reply = Head & { body: Uint8Array; truncated: boolean };
 
 /** The network as the reader uses it. */
 export type Net = {
-  /** Every address of a host name. */
-  resolve: (host: string) => Promise<{ address: string; family: number }[]>;
+  resolve: Resolve;
   /**
    * One GET, redirects not followed. A host name is resolved with `lookup` and the connection goes to what it hands back. The
    * body is read only when `wants` says so after the head, and only up to `maxBytes`. Rejects with an error named TimeoutError
@@ -59,22 +58,6 @@ export const nodeNet: Net = {
       req.end();
     }).finally(() => clearTimeout(timer));
   },
-};
-
-/** A name that resolves to an address that is not public. Its own class, so that this refusal reads differently from a failure. */
-class NotPublic extends Error {}
-
-/**
- * The `lookup` of every request: resolves the name, refuses the request when any answer is not public, and hands back the
- * answers it checked. What was checked is what is connected to, so a name that answers differently a moment later gains nothing.
- */
-const publicOnly = (resolve: Net["resolve"]): LookupFunction => (host, options, done) => {
-  resolve(host).then((answers) => {
-    const hidden = answers.find((a) => !isPublicAddress(a.address));
-    if (hidden !== undefined) throw new NotPublic(`${host} resolves to ${hidden.address}, which is not a public address`);
-    if (answers.length === 0) throw new Error(`${host} has no address`);
-    return answers;
-  }).then((answers) => (options.all ? done(null, answers) : done(null, answers[0].address, answers[0].family)), (cause) => done(cause, []));
 };
 
 /** Why a request got no reply, as the end of a sentence about the address. */
