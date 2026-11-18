@@ -54,9 +54,7 @@ apply() {
   cp "$here/AGENTS.md" "$data_dir/AGENTS.md"
   # downloads (yt-dlp, gallery-dl) and thumbnails (ffmpeg) run on this host, so provisioning installs them; no-op when present
   "$root/tools/bootstrap.sh"
-  # bb refuses server imports outside the plugin folder, so the plugin builds against a generated copy of the core
-  mkdir -p "$plugin_dir/core"
-  rsync -a --delete --exclude='*.test.ts' --exclude='migrate.ts' --exclude='contract.ts' --exclude='testing.ts' "$root/packages/core/src/" "$plugin_dir/core/"
+  "$root/tools/sync-plugin-core.sh"
   (cd "$plugin_dir" && bb plugin build >/dev/null)
   first_install=0
   if bb plugin list | grep -q '^bb-plugin-brandwise@\|^brandwise@'; then

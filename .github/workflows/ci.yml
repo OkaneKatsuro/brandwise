@@ -1,6 +1,6 @@
 name: CI
 on:
-  push: { branches: [main] }
+  push: { branches: [main, dev] }
   pull_request:
 permissions: { contents: read }
 jobs:
@@ -10,14 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
-      - name: Markdown is English
-        run: tools/check-english.sh
-      - name: Core tests (unit; database tests skip without DATABASE_URL)
-        working-directory: packages/core
-        run: npm install && npm test
-      - name: Plugin type check
-        working-directory: apps/bb-plugin-brandwise
-        run: |
-          mkdir -p core
-          rsync -a --delete --exclude='*.test.ts' --exclude='migrate.ts' --exclude='contract.ts' --exclude='testing.ts' ../../packages/core/src/ core/
-          npm install && npx tsc --noEmit
+      - name: Install dependencies
+        run: (cd packages/core && npm install) && (cd apps/bb-plugin-brandwise && npm install)
+      - name: Checks (English Markdown, core tests without a database, plugin type check)
+        run: tools/check.sh
