@@ -296,7 +296,7 @@ function Board({ map, selectedId, onSelect }: { map: CompanyMapView; selectedId:
 
 // --- details of the selected card ---
 
-function Facts({ rows }: { rows: [label: string, value: ReactNode][] }) {
+export function Facts({ rows }: { rows: [label: string, value: ReactNode][] }) {
   return (
     <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">
       {rows.map(([label, value]) => (
@@ -323,7 +323,7 @@ function PackFiles({ files }: { files: NodeOf<"pack">["files"] }) {
   );
 }
 
-const Note = ({ children }: { children: ReactNode }) => <p className="text-xs text-muted-foreground">{children}</p>;
+export const Note = ({ children }: { children: ReactNode }) => <p className="text-xs text-muted-foreground">{children}</p>;
 
 function CreativeDetails({ node, campaign }: { node: NodeOf<"creative">; campaign: string }) {
   const creative = useCreatives([node.assetId])[node.assetId];
@@ -482,7 +482,7 @@ const select = (selectedId: string | null) => setShared({ selectedId });
 
 // --- the page and its sidebar ---
 
-const Placeholder = ({ children }: { children: ReactNode }) => (
+export const Placeholder = ({ children }: { children: ReactNode }) => (
   <div role="status" className="m-4 flex flex-1 items-center justify-center rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">{children}</div>
 );
 

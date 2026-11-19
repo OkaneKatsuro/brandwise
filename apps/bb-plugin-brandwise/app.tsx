@@ -1,6 +1,7 @@
 // bb-plugin-brandwise — frontend entry. React and the SDK come from the host.
-// Surfaces: Calendar (full-surface calendar + approval sidebar, see calendar.tsx), Creatives, Video, E-mail, Map (see
-// map-page.tsx) and Campaigns pages, a pending-approval badge, and a homepage section listing what waits for a human.
+// Surfaces: Calendar (full-surface calendar + approval sidebar, see calendar.tsx), Creatives, Styles (the style library and the
+// style packs, see styles-page.tsx), Video, E-mail, Map (see map-page.tsx) and Campaigns pages, a pending-approval badge, and a
+// homepage section listing what waits for a human.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { definePluginApp, experimental_THREAD_ACTION_GROUPS, useBbNavigate, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
@@ -10,6 +11,8 @@ import { SCREENS } from "./agents";
 import { VideoPage } from "./video-page";
 import { EmailPage } from "./email-page";
 import { MapPage, MapSidebar } from "./map-page";
+import { StylesPage, StylesSidebar } from "./styles-page";
+import { CopyBlock } from "@/components/copy-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
@@ -830,39 +833,6 @@ function CampaignsPage({ subPath }: { subPath: string }) {
 }
 type Overview = Campaign & { threads: number; entries: number; creatives: number };
 
-/** A command block with a Copy button. */
-function CopyBlock({ label, text, note }: { label: string; text: string; note?: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    const done = () => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    };
-    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, () => {});
-    else {
-      const area = document.createElement("textarea");
-      area.value = text;
-      document.body.appendChild(area);
-      area.select();
-      document.execCommand("copy");
-      area.remove();
-      done();
-    }
-  };
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{label}</span>
-        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={copy}>
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed">{text}</pre>
-      {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
-    </div>
-  );
-}
-
 /** Settings section: everything needed to connect Claude Code to this instance over MCP, ready to paste. */
 function McpSettings() {
   const rpc = useRpc<typeof rpcContract>();
@@ -950,6 +920,14 @@ export default definePluginApp((app) => {
     icon: "brandwise/creatives",
     path: "creatives",
     component: CreativesPage,
+  });
+  app.slots.navPanel({
+    id: "styles",
+    title: "Styles",
+    icon: "brandwise/styles",
+    path: "styles",
+    component: StylesPage,
+    experimental_sidebar: StylesSidebar,
   });
   app.slots.navPanel({
     id: "video",

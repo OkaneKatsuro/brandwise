@@ -29,6 +29,8 @@ Video: `packages/video-remotion` is an optional engine (Remotion projects per ca
 
 The Map page (`apps/bb-plugin-brandwise/map-page.tsx`, `packages/core/src/map`) is a read-only board of one company, from the sites its pack was read from to what its posts brought: `docs/map.md`.
 
+The Styles page (`apps/bb-plugin-brandwise/styles-page.tsx`, `packages/core/src/styles`) shows the styles a creative can be generated in and is where a person adds, reads and switches style packs: `docs/styles.md`.
+
 ## Showing creatives in chat
 
 Every creative you produce (image or video poster) must be shown inline in the chat, not only named by path:

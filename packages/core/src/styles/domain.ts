@@ -4,7 +4,7 @@
 import Mustache from "mustache";
 import { MAX_PROMPT, MODEL_ID, type GenSpec } from "../providers/index.ts";
 
-const STYLE_KINDS = ["image", "video"] as const;
+export const STYLE_KINDS = ["image", "video"] as const;
 
 export type Style = {
   /** What the style is called. A style of a pack is listed and used under its address, `<pack>/<id>`. */
@@ -123,6 +123,12 @@ export function renderStyle(style: Style, input: { slots: Record<string, string>
   // slot values are plain text, not HTML: nothing is escaped
   const prompt = Mustache.render(style.prompt, Object.fromEntries(given), {}, { escape: String });
   return { model, prompt, aspect, params: { ...style.params, ...input.params } };
+}
+
+/** The pack a style's address names: `<pack>/<id>` is a style of that pack; a bare id is a built-in style and names none. */
+export function packOf(address: string): string | null {
+  const slash = address.indexOf("/");
+  return slash < 0 ? null : address.slice(0, slash);
 }
 
 /** What an asset records about the style it was made in: which recipe, which version of it and where the recipe came from. */

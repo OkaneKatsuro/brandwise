@@ -147,8 +147,8 @@ export function EntryText({ text }: { text: string }) {
   );
 }
 
-/** Two-step reject: a cancelled entry cannot be brought back, so the first click only arms the button. */
-function RejectButton({ label = "Reject", onConfirm, className }: { label?: string; onConfirm: () => void; className?: string }) {
+/** Two steps for what cannot be brought back (a cancelled entry, a removed style pack): the first click only arms the button. */
+export function ConfirmButton({ label, onConfirm, className }: { label: string; onConfirm: () => void; className?: string }) {
   const [armed, setArmed] = useState(false);
   return (
     <Button
@@ -671,7 +671,7 @@ function EntryDialog({
               ) : (
                 <>
                   {editable(entry) ? (
-                    <RejectButton
+                    <ConfirmButton
                       label={entry.status === "pending_approval" ? "Reject" : "Cancel entry"}
                       className="mr-auto"
                       onConfirm={() => decide("cancel")}

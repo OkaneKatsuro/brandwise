@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 import { BUILTIN_STYLES } from "./builtin/index.ts";
-import { selectStyles, styledSpec, type Style, type StyleRef, type StyleRequest } from "./domain.ts";
+import { packOf, selectStyles, styledSpec, type Style, type StyleRef, type StyleRequest } from "./domain.ts";
 import { checkPack, packSource } from "./pack.ts";
 import { readFolder, type Fetch } from "./source.ts";
 
@@ -65,18 +65,17 @@ export function createStyles(deps: { pool: pg.Pool; fetch: Fetch }) {
 
   /** The style at an address and where it comes from: a bare id is a built-in style, `<pack>/<id>` a style of a pack that is on. */
   async function find(address: string): Promise<{ style: Style; origin: StyleRef["origin"] }> {
-    const slash = address.indexOf("/");
-    if (slash < 0) {
+    const pack = packOf(address);
+    if (pack === null) {
       const style = BUILTIN_STYLES.find((s) => s.id === address);
       if (!style) throw new Error(`Unknown style "${address}". The built-in styles are ${BUILTIN_STYLES.map((s) => s.id).join(", ")}; a style of a pack is named <pack>/<id>. bb brandwise style list says what each is for.`);
       return { style, origin: "built-in" };
     }
-    const pack = address.slice(0, slash);
     const row = (await q(
       `select p.enabled_at, array(select id from style_pack_style where pack = p.name order by id) as ids,
               (select body from style_pack_style where pack = p.name and id = $2) as body
        from style_pack p where p.name = $1`,
-      [pack, address.slice(slash + 1)],
+      [pack, address.slice(pack.length + 1)],
     ))[0];
     if (!row) throw new Error(`Unknown style "${address}": there is no style pack "${pack}". bb brandwise style packs lists the packs there are.`);
     if (row.enabled_at === null) throw new Error(`Style pack "${pack}" is switched off, so "${address}" cannot be shown or used. A pack's text becomes prompts: a person reads its styles first (bb brandwise style review ${pack}) and then switches that text on.`);

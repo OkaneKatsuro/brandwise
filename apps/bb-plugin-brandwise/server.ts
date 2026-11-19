@@ -16,6 +16,7 @@ import { researchCli } from "./research-cli.ts";
 import { chromeRender } from "./core/context/chrome-render.ts";
 import { createVideo, videoContract } from "./video.ts";
 import { createMapRpc, mapContract } from "./map.ts";
+import { createStylesRpc, stylesContract } from "./styles.ts";
 import { createEmailTemplates, templatesContract } from "./email-templates.ts";
 import { sleep, slug } from "./util.ts";
 import { connectorsFrom, runDue, SHORTENED_CHANNELS, type ScopedTokens } from "./core/publish.ts";
@@ -179,6 +180,7 @@ export const rpcContract = defineRpcContract({
   ...videoContract,
   ...templatesContract,
   ...mapContract,
+  ...stylesContract,
   ...agentContract,
   settings_get: { input: z.null(), output: settingsViewSchema },
   config_get: { input: z.object({ campaignId: z.string().nullable() }), output: configViewSchema },
@@ -203,6 +205,7 @@ const THREAD_CAMPAIGN_CHANGED = "thread-campaign-changed";
 const CAMPAIGNS_CHANGED = "campaigns-changed";
 const CAMPAIGN_KEY = "campaignId"; // key in this plugin's metadata namespace on a thread
 const ASSETS_CHANGED = "assets-changed";
+const STYLES_CHANGED = "styles-changed";
 const MAX_UPLOAD_BYTES = 10_000_000;
 const MAX_PREVIEW_BYTES = 15_000_000;
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
@@ -412,6 +415,8 @@ export default async function plugin(bb: BbPluginApi) {
     const entries = await need().calendar.list();
     bb.realtime.publish(CALENDAR_CHANGED, { pending: entries.filter((e) => e.status === "pending_approval").length });
   };
+  // after every write to the style packs, from the Styles page or the CLI: the page shows which packs there are and which styles count
+  const stylesChanged = () => bb.realtime.publish(STYLES_CHANGED, {});
 
   // --- Generation: bb brandwise creative cost|generate|collect (also reachable over MCP `run`) ---
   // The provider, its account and its limits come from the scoped settings of the campaign (core/settings.ts): the campaign, then its
@@ -629,6 +634,7 @@ export default async function plugin(bb: BbPluginApi) {
     ...video.rpc,
     ...emailTemplates.rpc,
     ...createMapRpc({ need, metrics: () => metrics, now, thumbUrl }),
+    ...createStylesRpc({ need, changed: stylesChanged }),
     ...agents,
     calendar_list: async () => ({ entries: await need().calendar.list() }),
     calendar_add: async (input) => {
@@ -1542,7 +1548,7 @@ export default async function plugin(bb: BbPluginApi) {
             ? `Done: asset ${r.asset!.id} (${r.asset!.name}, ${r.asset!.width ?? "?"}x${r.asset!.height ?? "?"}), ~${r.credits} ${r.unit}. Show it with ::creative{ids="${r.asset!.id}"}`
             : `Still running (status ${r.status}), job ${jobId}. Finish with: bb brandwise creative collect ${jobId}`);
         }
-        if (area === "style") return styleCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
+        if (area === "style") return styleCli(c, action, args, { val, positional, reply, usage, actor: cliActor, changed: stylesChanged });
         if (area === "product") return productCli(c, action, args, { val, positional, reply, usage, actor: cliActor });
         if (area === "research") return researchCli(c, action, args, { val, positional, reply, usage, actor: cliActor, render: () => chromeRender({ enginePath: cfg.emailEnginePath, chromePath: cfg.chromePath, videoEnginePath: cfg.videoEnginePath }) });
         if (area === "video") return video.cli(action, args, { val, positional, reply, usage });

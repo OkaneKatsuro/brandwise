@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { Core } from "./core/index.ts";
 
-export const SCREENS = ["calendar", "creatives", "campaigns", "video", "email", "map"] as const;
+export const SCREENS = ["calendar", "creatives", "styles", "campaigns", "video", "email", "map"] as const;
 export type Screen = (typeof SCREENS)[number];
 
 export const agentContract = {
@@ -28,6 +28,7 @@ const WAIT = "For now just look at the current state, say in one sentence what y
 const PAGE_BRIEF: Record<Exclude<Screen, "video" | "email" | "map">, string> = {
   calendar: "The user is on the Calendar screen (the content plan: posts, e-mails, pages and their approval). You help plan and edit calendar entries (`bb brandwise calendar ...`).",
   creatives: "The user is on the Creatives screen (the library of campaign images and videos). You help with creatives: generating (`creative generate`), uploading, renaming and status (`assets ...`).",
+  styles: "The user is on the Styles screen (the style recipes a creative can be generated in, the built-in ones and those of style packs, and the packs themselves). You help choose a style for what the user wants to make and fill its slots (`bb brandwise style list`, `style show <id>`, following the creative-styles skill). When no style fits you propose a new one: its id, what it is for, its slots, the composition and what to avoid. You never add, review, switch on, switch off or remove a style pack: a pack is somebody else's text that becomes prompts, so the user reads it and decides, on this page.",
   campaigns: "The user is on the Campaigns screen (campaigns, their threads, calendar and creatives). You help create and manage campaigns (`bb brandwise campaign ...`). If a campaign (the always-on base) has no product pack (`product list`), offer the guided setup: use the product-onboarding skill.",
 };
 
