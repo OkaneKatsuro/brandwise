@@ -44,7 +44,7 @@ export function profileOf(address: string): Profile {
 /** One post as every platform has it. A count the platform does not show is null, never zero. */
 export type SocialPost = {
   url: string;
-  /** When it was published; YouTube gives the day only roughly. */
+  /** When it was published; YouTube gives the day only roughly, and no date for a short. */
   publishedAt: string | null;
   /** The caption, or the title where a platform has titles. */
   text: string;
@@ -105,9 +105,43 @@ export function postFrom(platform: Platform, raw: unknown): SocialPost | null {
   };
 }
 
-/** The posts newest first; a post without a date keeps the place its platform listed it in, after the dated ones. */
+/**
+ * The id of the YouTube channel a page of it belongs to, from the lines yt-dlp printed for that page; null when they name none.
+ */
+export function youtubeChannel(lines: readonly unknown[]): string | null {
+  for (const line of lines) {
+    const id = typeof line === "object" && line !== null ? (line as Record<string, unknown>).playlist_channel_id : undefined;
+    if (typeof id === "string" && /^UC[A-Za-z0-9_-]{22}$/.test(id)) return id;
+  }
+  return null;
+}
+
+/**
+ * A YouTube channel's posts, newest first, from three lists yt-dlp prints: its uploads (every video and short in the order they
+ * were published, with their counts but without dates: the playlist UU<id>), its videos page (dates, roughly) and its shorts page
+ * (which uploads are shorts). Each upload comes out as a line `postFrom` reads: its address as a short where it is one, and the
+ * date the videos page gave it, if any.
+ */
+export function youtubeUploads(uploads: readonly unknown[], videos: readonly unknown[], shorts: readonly unknown[]): Record<string, unknown>[] {
+  const idOf = (line: unknown) => {
+    const id = typeof line === "object" && line !== null ? (line as Record<string, unknown>).id : undefined;
+    return typeof id === "string" && /^[A-Za-z0-9_-]{6,20}$/.test(id) ? id : null;
+  };
+  const dates = new Map(videos.flatMap((line) => { const id = idOf(line); return id === null ? [] : [[id, (line as Record<string, unknown>).timestamp] as const]; }));
+  const isShort = new Set(shorts.map(idOf));
+  return uploads.flatMap((line) => {
+    const id = idOf(line);
+    if (id === null) return [];
+    return [{ ...(line as Record<string, unknown>), webpage_url: null, url: isShort.has(id) ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}`, timestamp: dates.get(id) ?? null }];
+  });
+}
+
+/**
+ * The posts newest first. A lister lists them newest first already; the dates only correct that order (Instagram lists pinned
+ * posts first), so the posts are sorted by date when every one has a date, and keep their listed order otherwise.
+ */
 export const newestFirst = (posts: readonly SocialPost[]): SocialPost[] =>
-  [...posts].sort((a, b) => (a.publishedAt === null ? (b.publishedAt === null ? 0 : 1) : b.publishedAt === null ? -1 : b.publishedAt.localeCompare(a.publishedAt)));
+  posts.every((p) => p.publishedAt !== null) ? [...posts].sort((a, b) => b.publishedAt!.localeCompare(a.publishedAt!)) : [...posts];
 
 const median = (values: number[]): number | null => {
   if (values.length === 0) return null;
@@ -122,7 +156,10 @@ export type SocialAudit = {
   /** The oldest and the newest post that has a date. */
   from: string | null;
   to: string | null;
-  /** Posts a week between those two; null when fewer than two posts have a date or they are less than a day apart. */
+  /**
+   * Posts a week from the oldest dated post to the newest, counting the undated ones listed between them; null when fewer than
+   * two posts have a date or they are less than a day apart.
+   */
   perWeek: number | null;
   formats: Partial<Record<SocialPost["format"], number>>;
   /** What is usual for a post here; null where the platform shows no such count. */
@@ -136,9 +173,13 @@ export type SocialAudit = {
 };
 
 export function audit(posts: readonly SocialPost[]): SocialAudit {
-  const dated = known(posts.map((p) => (p.publishedAt === null ? null : Date.parse(p.publishedAt))));
+  const ordered = newestFirst(posts);
+  const dated = known(ordered.map((p) => (p.publishedAt === null ? null : Date.parse(p.publishedAt))));
   const first = dated.length ? Math.min(...dated) : null, last = dated.length ? Math.max(...dated) : null;
-  const days = first === null || last === null ? 0 : (last - first) / 86_400_000;
+  // the posts listed between the newest dated one and the oldest dated one were published between them, dated or not
+  const at = ordered.flatMap((p, i) => (p.publishedAt === null ? [] : [i]));
+  const listed = at.length < 2 ? 0 : at[at.length - 1] - at[0];
+  const days = at.length < 2 ? 0 : (Date.parse(ordered[at[0]].publishedAt!) - Date.parse(ordered[at[at.length - 1]].publishedAt!)) / 86_400_000;
   const formats: SocialAudit["formats"] = {};
   for (const p of posts) formats[p.format] = (formats[p.format] ?? 0) + 1;
   const by: "views" | "likes" = posts.some((p) => p.views !== null) ? "views" : "likes";
@@ -147,12 +188,12 @@ export function audit(posts: readonly SocialPost[]): SocialAudit {
   return {
     posts: posts.length,
     from: first === null ? null : new Date(first).toISOString(), to: last === null ? null : new Date(last).toISOString(),
-    perWeek: dated.length < 2 || days < 1 ? null : Math.round(((dated.length - 1) / (days / 7)) * 10) / 10,
+    perWeek: days < 1 ? null : Math.round((listed / (days / 7)) * 10) / 10,
     formats,
     usual: { likes: median(known(posts.map((p) => p.likes))), comments: median(known(posts.map((p) => p.comments))), views: median(known(posts.map((p) => p.views))) },
     top: posts.filter((p) => p[by] !== null).sort((a, b) => b[by]! - a[by]!).slice(0, 3),
     hashtags: [...tags].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 10).map(([tag, n]) => ({ tag, posts: n })),
-    openings: newestFirst(posts).map((p) => p.text.split("\n")[0].slice(0, OPENING)).filter((line) => line !== "").slice(0, 10),
+    openings: ordered.map((p) => p.text.split("\n")[0].slice(0, OPENING)).filter((line) => line !== "").slice(0, 10),
   };
 }
 

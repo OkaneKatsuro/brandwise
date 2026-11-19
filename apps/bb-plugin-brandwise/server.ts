@@ -15,6 +15,7 @@ import { productCli } from "./product.ts";
 import { researchCli } from "./research-cli.ts";
 import { chromeRender } from "./core/context/chrome-render.ts";
 import type { ListPosts } from "./core/context/index.ts";
+import { youtubeChannel, youtubeUploads } from "./core/context/social.ts";
 import { createVideo, videoContract } from "./video.ts";
 import { createMapRpc, mapContract } from "./map.ts";
 import { createStylesRpc, stylesContract } from "./styles.ts";
@@ -1176,10 +1177,13 @@ export default async function plugin(bb: BbPluginApi) {
     }
     const flat = (address: string) => lines("yt-dlp", ["--flat-playlist", "--dump-json", "--playlist-end", String(last), "--no-warnings", "--extractor-args", "youtubetab:approximate_date", "--", address]);
     if (profile.platform === "tiktok") return flat(profile.url);
-    // a channel keeps its long videos and its shorts on two pages; one that has only one kind gives nothing for the other
+    // A channel's uploads playlist has every video and short in the order they were published, but no dates; its videos page has
+    // the dates (roughly) and its shorts page says which uploads are shorts. A channel with only one kind has no page for the other.
     const [videos, shorts] = await Promise.allSettled([flat(`${profile.url}/videos`), flat(`${profile.url}/shorts`)]);
     if (videos.status === "rejected" && shorts.status === "rejected") throw videos.reason;
-    return [...(videos.status === "fulfilled" ? videos.value : []), ...(shorts.status === "fulfilled" ? shorts.value : [])];
+    const [dated, short] = [videos, shorts].map((list) => (list.status === "fulfilled" ? list.value : []));
+    const channel = youtubeChannel([...dated, ...short]);
+    return channel === null ? [] : youtubeUploads(await flat(`https://www.youtube.com/playlist?list=UU${channel.slice(2)}`), dated, short);
   };
 
   /** Generation parameters from CLI flags. Spawned without a shell, but the lengths and the model name are still bounded. */
