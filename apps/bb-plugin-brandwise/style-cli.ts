@@ -1,14 +1,18 @@
 // CLI of the style library: `bb brandwise style list|show` for the styles and `style packs|add|review|enable|disable|remove` for
-// the style packs. The styles, the packs and their rules live in packages/core/src/styles; this file parses arguments and prints.
+// the style packs. The styles, the packs and their rules live in packages/core/src/styles; this file parses arguments, prints, and
+// says when the packs changed, so that the Styles page follows.
 // Agents read styles; a person adds a pack, reads what was stored (`style review`) and switches on that text by its digest
 // (`style enable`), as skills/creative-styles tells the agents.
 import type { Core } from "./core/index.ts";
 import type { InstalledPack, Style } from "./core/styles/index.ts";
 
-type Io = { val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string; actor: (argv: string[]) => string };
+type Io = { val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string; actor: (argv: string[]) => string; changed: () => void };
 
 /** One style among others: enough to choose by goal and channel. */
 const summary = (s: Style, width: number) => `${s.id.padEnd(width)} ${s.kind.padEnd(6)} ${s.aspects.join(", ").padEnd(21)} ${s.channels.join(", ")}\n    ${s.title}. ${s.use}`;
+
+/** The command line that generates a creative in a style: whoever runs it fills each slot and names the campaign. */
+export const generateCommand = (s: Style) => `bb brandwise creative generate --style ${s.id} ${Object.keys(s.slots).map((name) => `--slot ${name}="..."`).join(" ")} --campaign <c>`;
 
 /** Everything needed to use a style: when it fits, what to fill in, the post text that goes with it and what to avoid. */
 const describe = (s: Style) => {
@@ -25,7 +29,7 @@ const describe = (s: Style) => {
     `Post text: ${s.copy}`,
     `Avoid: ${s.avoid}`,
     `Template (code fills it from the slots; never copy it into --prompt): ${s.prompt}`,
-    `Generate: bb brandwise creative generate --style ${s.id} ${Object.keys(s.slots).map((name) => `--slot ${name}="..."`).join(" ")} --campaign <c>`,
+    `Generate: ${generateCommand(s)}`,
   ].join("\n");
 };
 
@@ -44,7 +48,7 @@ const packLines = (p: InstalledPack) => [
 ].join("\n");
 
 /** `bb brandwise style list [--kind image|video] [--channel <c>] | show <id> | packs | add <folder | https git address> | review <pack> | enable <pack> --digest <digest> | disable <pack> | remove <pack>` */
-export async function styleCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage, actor }: Io) {
+export async function styleCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage, actor, changed }: Io) {
   if (action === "list") {
     const styles = await c.styles.list({ kind: val(args, "--kind"), channel: val(args, "--channel") });
     const width = Math.max(20, ...styles.map((s) => s.id.length));
@@ -62,6 +66,7 @@ export async function styleCli(c: Core, action: string | undefined, args: string
   }
   if (action === "add") {
     const pack = await c.styles.addPack(name, actor(args));
+    changed();
     return reply(pack, `${pack.replaced ? "Replaced" : "Added"} pack ${pack.name}: ${pack.styles.join(", ")}\nIt is off: its styles are not listed and cannot be used. A person reads what was stored with: bb brandwise style review ${pack.name}`);
   }
   if (action === "review") {
@@ -73,14 +78,17 @@ export async function styleCli(c: Core, action: string | undefined, args: string
     const digest = val(args, "--digest");
     if (digest === undefined) return { exitCode: 1, stderr: `Give --digest <digest>: read the pack first with bb brandwise style review ${name}, which shows its styles and the digest of that text` };
     const pack = await c.styles.enablePack(name, actor(args), digest);
+    changed();
     return reply(pack, `Pack ${pack.name} is on since ${pack.enabledAt?.slice(0, 16)} by ${pack.enabledBy}: ${pack.styles.join(", ")}`);
   }
   if (action === "disable") {
     const pack = await c.styles.disablePack(name);
+    changed();
     return reply(pack, `Pack ${pack.name} is off: its styles are not listed and cannot be used`);
   }
   if (action === "remove") {
     await c.styles.removePack(name);
+    changed();
     return reply({ removed: name }, `Removed pack ${name} and its styles`);
   }
   return { exitCode: 1, stderr: usage };

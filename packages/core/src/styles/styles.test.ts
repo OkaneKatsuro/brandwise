@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { BUILTIN_STYLES } from "./builtin/index.ts";
-import { parseStyle, renderStyle, selectStyles, styledSpec, type Style } from "./domain.ts";
+import { packOf, parseStyle, renderStyle, selectStyles, styledSpec, type Style } from "./domain.ts";
 
 const HERO: Style = {
   id: "hero", title: "Hero", kind: "image", aspects: ["4:5", "1:1"], channels: ["linkedin", "meta_ads"],
@@ -157,6 +157,12 @@ test("selectStyles: a kind keeps only styles of that kind, a channel only styles
   assert.deepEqual(selectStyles(BUILTIN_STYLES, { kind: "video", channel: "email" }), [], "both filters apply");
   assert.deepEqual(selectStyles(BUILTIN_STYLES, { channel: "fax" }), []);
   assert.throws(() => selectStyles(BUILTIN_STYLES, { kind: "audio" }), /Unknown kind "audio": a style is image or video/);
+});
+
+test("packOf: an address names the pack before its first slash; a bare id is a built-in style's and names none", () => {
+  assert.equal(packOf("product-hero"), null);
+  assert.equal(packOf("founder-extras/comparison-table"), "founder-extras");
+  assert.equal(packOf("founder-extras/comparison-table/more"), "founder-extras", "whatever follows the first slash is the id, which the pack then has or has not");
 });
 
 test("styledSpec: a generation that names a style gets its spec from the style, and the asset records the style's id, version and origin", () => {

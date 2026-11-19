@@ -16,6 +16,7 @@
       "experimental_icons": {
         "calendar": "./icons/calendar.svg",
         "creatives": "./icons/creatives.svg",
+        "styles": "./icons/styles.svg",
         "campaign": "./icons/campaign.svg",
         "video": "./icons/video.svg",
         "email": "./icons/email.svg",
