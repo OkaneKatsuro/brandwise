@@ -2,6 +2,7 @@
 // in PROVIDERS; its settings (account, workspace, limits) are declared here, so the Settings page, the campaign page and the
 // CLI pick it up without further code. Anything that talks to a service lives in the provider, nothing else does.
 import type { SettingField, SettingValue } from "../settings.ts";
+import { byteplus } from "./byteplus.ts";
 import { higgsfield } from "./higgsfield.ts";
 
 export { MAX_PROMPT, MODEL_ID } from "./input.ts";
@@ -40,6 +41,10 @@ export interface Provider {
   label: string;
   /** What costs are counted in: "credits", "usd"... */
   unit: string;
+  /** The model a generation uses when none is named. */
+  defaultModel: string;
+  /** The limits a scope has until it sets its own, in the provider's unit: for one generation, and for a day. */
+  budget: { perGeneration: number; daily: number };
   /** Short keys; the stored setting key is `${id}.${key}`. Budgets are added for every provider (see budgetFields). */
   fields: ProviderField[];
   /** Is the account of this configuration signed in, and as whom. Spends nothing. */
@@ -54,7 +59,7 @@ export interface Provider {
   get(cfg: ProviderConfig, jobId: string): Promise<Job>;
 }
 
-export const PROVIDERS: Provider[] = [higgsfield];
+export const PROVIDERS: Provider[] = [higgsfield, byteplus];
 export const providerById = (id: string): Provider => {
   const p = PROVIDERS.find((x) => x.id === id);
   if (!p) throw new Error(`Unknown provider "${id}" (known: ${PROVIDERS.map((x) => x.id).join(", ")})`);
@@ -63,8 +68,8 @@ export const providerById = (id: string): Provider => {
 
 /** Limits every provider has. Counted in the provider's unit. */
 const budgetFields = (p: Provider): ProviderField[] => [
-  { key: "maxPerGeneration", label: `Max ${p.unit} per generation`, description: "Hard ceiling for one image or video. Callers (CLI, MCP) can only ask for less.", type: "number", default: 5 },
-  { key: "dailyBudget", label: `Daily budget (${p.unit})`, description: "Generation is refused for the rest of the day once everything under this scope has spent this much. A campaign's budget counts its own spend, the global one counts all.", type: "number", default: 40 },
+  { key: "maxPerGeneration", label: `Max ${p.unit} per generation`, description: "Hard ceiling for one image or video. Callers (CLI, MCP) can only ask for less.", type: "number", default: p.budget.perGeneration },
+  { key: "dailyBudget", label: `Daily budget (${p.unit})`, description: "Generation is refused for the rest of the day once everything under this scope has spent this much. A campaign's budget counts its own spend, the global one counts all.", type: "number", default: p.budget.daily },
 ];
 
 export const SETTING_FIELDS: SettingField[] = [

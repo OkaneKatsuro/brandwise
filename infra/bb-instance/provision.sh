@@ -80,6 +80,8 @@ apply() {
    if [ -n "${RESEND_API_KEY:-}" ]; then cfg resendApiKey "$RESEND_API_KEY"; fi
    if [ -n "${RESEND_WEBHOOK_SECRET:-}" ]; then cfg resendWebhookSecret "$RESEND_WEBHOOK_SECRET"; fi
    if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then cfg telegramBotToken "$TELEGRAM_BOT_TOKEN"; fi
+   # optional providers of generation: the key of the account every scope generates with unless it sets its own
+   if [ -n "${BYTEPLUS_API_KEY:-}" ]; then cfg byteplusApiKey "$BYTEPLUS_API_KEY"; fi
    if [ -n "${META_PUBLISH_TOKEN:-}" ]; then cfg metaPublishToken "$META_PUBLISH_TOKEN"; fi
    if [ -n "${TIKTOK_CLIENT_KEY:-}" ]; then cfg tiktokClientKey "$TIKTOK_CLIENT_KEY"; cfg tiktokClientSecret "${TIKTOK_CLIENT_SECRET:-}"; fi
    if [ -n "${YOUTUBE_CLIENT_ID:-}" ]; then cfg youtubeClientId "$YOUTUBE_CLIENT_ID"; cfg youtubeClientSecret "${YOUTUBE_CLIENT_SECRET:-}"; fi

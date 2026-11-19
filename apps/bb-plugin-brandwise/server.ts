@@ -238,6 +238,7 @@ export default async function plugin(bb: BbPluginApi) {
     }),
     section("tools", "Tools", "Command-line tools the providers run on this host, outside the agents' sandbox, so only the operator sets them. Account, workspace and limits are set per scope under Providers.", {
       higgsfieldBin: { type: "string", label: "Higgsfield CLI", description: "Name or path of the higgsfield binary.", default: "higgsfield" },
+      byteplusApiKey: { type: "string", label: "BytePlus API key", description: "The key of the BytePlus account that generates with Seedance (console: ModelArk > API keys), for every scope that sets no key of its own under Providers. Set by a person, or from BYTEPLUS_API_KEY in .env by provisioning.", default: "", secret: true },
     }),
     section("video", "Video", "The optional Remotion engine behind the Video page.", {
       videoEnginePath: { type: "string", label: "Engine folder", description: "Folder holding render.mjs of @brandwise/video-remotion. Empty = video commands are off.", default: "" },
@@ -425,7 +426,11 @@ export default async function plugin(bb: BbPluginApi) {
   const today = () => new Date().toISOString().slice(0, 10);
   // shortcut: the default data dir of this instance; read it from bb when the SDK offers it
   const PROFILES_DIR = px.join(osx.homedir(), ".bb-brandwise", "providers");
-  const host = () => ({ profilesDir: PROFILES_DIR, bins: { higgsfield: cfg.higgsfieldBin } });
+  const host = () => {
+    // what the operator set on this host for the providers: a binary, and the key every scope uses until it sets its own
+    const defaults: Record<string, Record<string, SettingValue>> = cfg.byteplusApiKey === "" ? {} : { byteplus: { apiKey: cfg.byteplusApiKey } };
+    return { profilesDir: PROFILES_DIR, bins: { higgsfield: cfg.higgsfieldBin }, defaults };
+  };
   const spendKey = (provider: string, scope: Scope) => `gen_spend:${today()}:${provider}:${scope ?? "global"}`;
   const spentAt = async (provider: string, scope: Scope) => (await bb.storage.kv.get<number>(spendKey(provider, scope))) ?? 0;
   const scopeName = async (c: Core, scope: Scope) => (scope === null ? "global" : ((await c.campaigns.list()).find((x) => x.id === scope)?.name ?? scope));
@@ -459,8 +464,8 @@ export default async function plugin(bb: BbPluginApi) {
   async function collectGeneration(c: Core, jobId: string, waitSeconds: number) {
     const meta = await bb.storage.kv.get<GenJob>(`gen_job:${jobId}`);
     if (!meta) throw new Error(`Unknown generation job ${jobId} (only jobs started through this plugin can be collected)`);
-    if (meta.assetId) return { state: "done" as const, jobId, status: "completed", credits: meta.credits, asset: await c.assets.get(meta.assetId) };
     const { provider, config } = await c.generation.providerFor(meta.campaignId, host(), meta.provider ?? "higgsfield");
+    if (meta.assetId) return { state: "done" as const, jobId, status: "completed", credits: meta.credits, unit: provider.unit, asset: await c.assets.get(meta.assetId) };
     const deadline = Date.now() + waitSeconds * 1000;
     for (;;) {
       const job = await provider.get(config, jobId);
@@ -474,9 +479,9 @@ export default async function plugin(bb: BbPluginApi) {
         });
         await bb.storage.kv.set(`gen_job:${jobId}`, { ...meta, assetId: asset.id });
         bb.realtime.publish(ASSETS_CHANGED, {});
-        return { state: "done" as const, jobId, status: job.status, credits: meta.credits, asset };
+        return { state: "done" as const, jobId, status: job.status, credits: meta.credits, unit: provider.unit, asset };
       }
-      if (Date.now() >= deadline) return { state: "pending" as const, jobId, status: job.status, credits: meta.credits, asset: null };
+      if (Date.now() >= deadline) return { state: "pending" as const, jobId, status: job.status, credits: meta.credits, unit: provider.unit, asset: null };
       await sleep(2000);
     }
   }
@@ -876,7 +881,7 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb brandwise assets download <url> [--campaign <c>]    (Instagram, TikTok, YouTube; runs on the host outside your sandbox, with the browser session the user picked under Settings > Providers > Downloads, if any; saved as a reference asset, prints its local path)",
     "  bb brandwise assets rename <id> <name> | assets set <id> --status <draft|linted|approved|archived> | assets delete <id>",
     "  bb brandwise creative models [--video|--image] [--campaign <c>] | creative model <model-id> [--campaign <c>]   (which models exist, and the parameters and media one model takes)",
-    "  bb brandwise creative cost (--prompt <text> | --style <id> --slot name=value...) [--campaign <c>] [--model nano_banana_pro] [--aspect 4:5] [--resolution 2k] [--no-brand] [media and parameters as in generate]   (estimate, spends nothing; says whether the company's look stands in front of the prompt)",
+    "  bb brandwise creative cost (--prompt <text> | --style <id> --slot name=value...) [--campaign <c>] [--model <id>] [--aspect 4:5] [--resolution 2k] [--no-brand] [media and parameters as in generate]   (estimate, spends nothing; says whether the company's look stands in front of the prompt)",
     "  bb brandwise creative generate (--prompt <text> | --style <id> --slot name=value...) [--model ..] [--aspect ..] [--resolution ..] [--campaign <c>] [--role creative|source] [--name <n>] [--ref <image>]... [--start-image <image>] [--end-image <image>] [--video-ref <file>]... [--audio-ref <file>]... [--duration <n>] [--param name=value]... [--no-brand] [--max-credits N] [--wait-seconds 18]   (which media and parameters a model takes: creative model <id>; with --style the style writes the prompt and sets the model, aspect and parameters that are not given; the company's look, its confirmed design.json, is put in front of every prompt by code, so no prompt or slot repeats it; --no-brand leaves it out)",
     "  bb brandwise creative collect <job-id> [--wait-seconds 18]   (finish a generation that was still running)",
     "  bb brandwise style list [--kind image|video] [--channel <c>] | style show <id>   (style recipes for creatives: what each is for, its slots, aspects and channels, the post text that goes with it, what to avoid; a built-in style has a bare id, a style of a pack is <pack>/<id>)",
@@ -1160,11 +1165,12 @@ export default async function plugin(bb: BbPluginApi) {
     if (duration !== undefined) params.duration = duration;
     const styleId = val(args, "--style");
     if (styleId === undefined && args.includes("--slot")) throw new Error("--slot fills a slot of a style: name the style with --style <id> (bb brandwise style list)");
+    const { provider } = await c.generation.providerFor(scope, host());
     const styled = styleId === undefined ? undefined : await c.styles.spec({
-      style: styleId, slots: pairs(args, "--slot"), provider: (await c.generation.providerFor(scope, host())).provider.id,
+      style: styleId, slots: pairs(args, "--slot"), provider: provider.id,
       prompt: val(args, "--prompt"), model, aspect: val(args, "--aspect"), params,
     });
-    const base: GenSpec = styled?.spec ?? { model: model ?? "nano_banana_pro", prompt: (val(args, "--prompt") ?? "").trim(), aspect: val(args, "--aspect"), params };
+    const base: GenSpec = styled?.spec ?? { model: model ?? provider.defaultModel, prompt: (val(args, "--prompt") ?? "").trim(), aspect: val(args, "--aspect"), params };
     if (base.prompt === "") throw new Error("Give --prompt <text>, or --style <id> with its slots (bb brandwise style list)");
     const branded = await c.generation.branded(scope, base.prompt, { brand: !args.includes("--no-brand"), styled: styled !== undefined });
     const one = (name: string) => { const v = val(args, name); return v === undefined ? undefined : mediaFile(v); };
@@ -1197,7 +1203,7 @@ export default async function plugin(bb: BbPluginApi) {
       { name: "doctor", summary: "Check that the host tools BrandWise needs are installed", usage: "bb brandwise doctor" },
       { name: "config", summary: "Provider, account and limits per scope (global or campaign)", usage: "bb brandwise config list|set|unset ..." },
       { name: "providers", summary: "Check that the account of a scope is signed in at each provider", usage: "bb brandwise providers status ..." },
-      { name: "creative", summary: "Estimate, generate (Higgsfield) and collect creatives", usage: "bb brandwise creative models|model|cost|generate|collect ..." },
+      { name: "creative", summary: "Estimate, generate and collect creatives with the provider of the scope", usage: "bb brandwise creative models|model|cost|generate|collect ..." },
       { name: "style", summary: "Style recipes for creatives: list them or show one; add, switch on or off, or remove a style pack", usage: "bb brandwise style list|show|packs|add|review|enable|disable|remove ..." },
       { name: "product", summary: "Read, write, confirm or import the versioned Markdown product pack of a brand", usage: "bb brandwise product list|get|set|history|confirm|import ..." },
       { name: "research", summary: "Read a company's public site into a digest, and take its look from a rendered page, to draft its product pack from", usage: "bb brandwise research site|look <url> ..." },
@@ -1539,7 +1545,7 @@ export default async function plugin(bb: BbPluginApi) {
           }
           const r = await collectGeneration(c, jobId, wait);
           return reply(r, r.state === "done"
-            ? `Done: asset ${r.asset!.id} (${r.asset!.name}, ${r.asset!.width ?? "?"}x${r.asset!.height ?? "?"}), ~${r.credits} credits. Show it with ::creative{ids="${r.asset!.id}"}`
+            ? `Done: asset ${r.asset!.id} (${r.asset!.name}, ${r.asset!.width ?? "?"}x${r.asset!.height ?? "?"}), ~${r.credits} ${r.unit}. Show it with ::creative{ids="${r.asset!.id}"}`
             : `Still running (status ${r.status}), job ${jobId}. Finish with: bb brandwise creative collect ${jobId}`);
         }
         if (area === "style") return styleCli(c, action, args, { val, positional, reply, usage, actor: cliActor, changed: stylesChanged });

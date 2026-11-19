@@ -32,6 +32,19 @@ The CLI keeps its OAuth login in `$HOME/.config/higgsfield`. Two settings give a
 - **Account profile** (`higgsfield.profile`): a name; the CLI then runs with its own `HOME` (`~/.bb-brandwise/providers/higgsfield/<name>`), so it has its own login. Sign in once in a terminal with the command that `bb brandwise providers status --campaign <c>` (or "Check accounts") prints. Empty = the account signed in on the host.
 - **Workspace id** (`higgsfield.workspaceId`): the billing workspace of the account (`HIGGSFIELD_WORKSPACE_ID`).
 
+### BytePlus
+
+ByteDance's own API for its Seedance video models (ModelArk), over HTTPS with an API key; costs are in US dollars. The key comes
+from the BytePlus console (ModelArk > API keys), and the Seedance models must be activated in that account.
+
+- **API key** (`byteplus.apiKey`, a secret): the account a scope generates with, set on the Settings or the campaign page.
+- Without one, a scope uses the instance's key: the plugin setting `byteplusApiKey`, which provisioning fills from
+  `BYTEPLUS_API_KEY` in `.env`.
+- `bb brandwise creative models` lists the models with what five seconds cost; `creative model <id>` says what a model takes.
+  The price is worked out before a task is sent, from BytePlus's documented formula (pixels of a frame x frames per second x
+  seconds / 1024 tokens, at the model's price per million tokens), and the limits below apply to it.
+- The standard limits are 1 USD for one generation and 5 USD a day.
+
 ## Limits
 
 `<provider>.maxPerGeneration` is resolved like any setting (the nearest scope wins). `<provider>.dailyBudget` nests: every scope of the chain that sets one applies, and spend is counted at every scope of the chain, so a budget on an always-on base covers all its campaigns and the global one covers everything (it defaults to 40 credits). A generation is refused, before anything is spent, if it breaks any of them.
