@@ -437,10 +437,11 @@ export function createCore(cfg: CoreConfig) {
 
   const generation = {
     /** The provider a scope generates with (or the given one), and its settings as that scope sees them. */
-    async providerFor(scope: Scope, host: { profilesDir: string; bins?: Record<string, string> }, providerId?: string) {
+    async providerFor(scope: Scope, host: { profilesDir: string; bins?: Record<string, string>; defaults?: Record<string, Record<string, SettingValue>> }, providerId?: string) {
       const id = providerId ?? String((await settings.resolve(scope, "generation.provider"))?.value);
       const provider = providerById(id);
-      const values: Record<string, SettingValue> = {};
+      // what the operator set on the host for this provider (a key from .env) holds until a scope sets its own
+      const values: Record<string, SettingValue> = { ...host.defaults?.[provider.id] };
       for (const f of provider.fields) {
         const r = await settings.resolve(scope, `${provider.id}.${f.key}`);
         if (r) values[f.key] = r.value;

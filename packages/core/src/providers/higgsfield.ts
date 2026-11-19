@@ -91,6 +91,8 @@ export const higgsfield: Provider = {
   id: "higgsfield",
   label: "Higgsfield",
   unit: "credits",
+  defaultModel: "nano_banana_pro",
+  budget: { perGeneration: 5, daily: 40 },
   fields: [
     {
       key: "profile", label: "Account profile", type: "string", default: "",
