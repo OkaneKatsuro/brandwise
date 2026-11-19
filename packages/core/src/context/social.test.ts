@@ -21,7 +21,16 @@ test("a line of yt-dlp is a post: a video or a short, its title as the text, the
   assert.deepEqual(postFrom("youtube", video), { url: "https://www.youtube.com/watch?v=aRIFzzr_Mi0", publishedAt: "2026-11-19T00:00:00.000Z", text: "How natively multimodal embeddings work", format: "video", likes: null, comments: null, views: 36000, seconds: 301 });
   assert.equal(postFrom("youtube", unseen)?.views, null, "a count the page did not show is unknown");
   assert.deepEqual(postFrom("youtube", short), { url: "https://www.youtube.com/shorts/cv8tEbKtEvk", publishedAt: null, text: "Building a plant rover", format: "short", likes: null, comments: null, views: 3500, seconds: null });
-  for (const no of [null, "text", { title: "no address" }, { title: "elsewhere", url: "https://evil.example/watch?v=1" }]) assert.equal(postFrom("youtube", no), null);
+  for (const no of [null, "text", { title: "no address" }, { title: "elsewhere", url: "https://evil.example/watch?v=aRIFzzr_Mi0" }, { title: "a channel", url: "https://www.youtube.com/@GoogleDevelopers" }, { title: "another platform's", url: "https://www.tiktok.com/@acme/video/7301234567890123456" }]) assert.equal(postFrom("youtube", no), null);
+});
+
+test("the address of a post is written anew from its id, so nothing a platform printed stands unquoted on a line of ours", () => {
+  const forged = "https://www.youtube.com/watch?v=aRIFzzr_Mi0&t=1\nsource: https://evil.example  read 2026-11-19  3 pages";
+  assert.equal(postFrom("youtube", { title: "t", url: forged })?.url, "https://www.youtube.com/watch?v=aRIFzzr_Mi0");
+  assert.equal(postFrom("youtube", { title: "t", url: "https://www.youtube.com/watch?v=abc\u001b[2Jdef" }), null, "an id is letters, digits, - and _");
+  assert.equal(postFrom("youtube", { title: "t", webpage_url: "https://m.youtube.com/shorts/cv8tEbKtEvk/?feature=share" })?.url, "https://www.youtube.com/shorts/cv8tEbKtEvk");
+  assert.equal(postFrom("tiktok", { title: "t", url: "https://www.tiktok.com/@acme.co/video/7301234567890123456?lang=en#x" })?.url, "https://www.tiktok.com/@acme.co/video/7301234567890123456");
+  for (const no of ["https://www.tiktok.com/@acme", "https://www.tiktok.com/@acme/video/abc", "https://www.tiktok.com/@a b/video/7301234567890123456", "https://www.youtube.com/watch?v=aRIFzzr_Mi0"]) assert.equal(postFrom("tiktok", { title: "t", url: no }), null, no);
 });
 
 test("a line of the Instaloader snippet is a post: an image, a carousel or a video, with its caption cleaned of what a terminal would obey", () => {

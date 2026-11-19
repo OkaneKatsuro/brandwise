@@ -65,6 +65,23 @@ const when = (v: unknown): string | null => {
 };
 
 /**
+ * The address of a YouTube or TikTok post, written anew from the parts that name it: the address a tool printed is the platform's
+ * word, and it stands unquoted on a line of ours. null for anything that is not a post of that platform.
+ */
+function postAddress(platform: "youtube" | "tiktok", printed: unknown): string | null {
+  let url: URL;
+  try { url = new URL(typeof printed === "string" ? printed : ""); } catch { return null; }
+  if (url.protocol !== "https:" || HOSTS[url.hostname.replace(/^(www|m)\./, "")] !== platform) return null;
+  if (platform === "tiktok") {
+    const video = /^\/(@[A-Za-z0-9._]{2,24})\/video\/(\d{5,25})\/?$/.exec(url.pathname);
+    return video ? `https://www.tiktok.com/${video[1]}/video/${video[2]}` : null;
+  }
+  const short = /^\/shorts\/([^/]+)\/?$/.exec(url.pathname);
+  const id = short ? short[1] : url.pathname === "/watch" ? url.searchParams.get("v") ?? "" : "";
+  return /^[A-Za-z0-9_-]{6,20}$/.test(id) ? `https://www.youtube.com/${short ? "shorts/" : "watch?v="}${id}` : null;
+}
+
+/**
  * A post from what a lister printed for it; null for a line that is not a post. Instagram's lines are our own (the snippet in the
  * plugin names the fields), the others are yt-dlp's entries of a channel or a profile page.
  */
@@ -79,10 +96,10 @@ export function postFrom(platform: Platform, raw: unknown): SocialPost | null {
       likes: count(r.likes), comments: count(r.comments), views: count(r.views), seconds: count(r.duration),
     };
   }
-  const address = typeof r.webpage_url === "string" ? r.webpage_url : typeof r.url === "string" ? r.url : "";
-  if (!/^https:\/\/(www\.)?(youtube|tiktok)\.com\//.test(address)) return null;
+  const address = postAddress(platform, r.webpage_url) ?? postAddress(platform, r.url);
+  if (address === null) return null;
   return {
-    url: address.slice(0, 300), publishedAt: when(r.timestamp), text: clean(r.title) || clean(r.description),
+    url: address, publishedAt: when(r.timestamp), text: clean(r.title) || clean(r.description),
     format: address.includes("/shorts/") ? "short" : "video",
     likes: count(r.like_count), comments: count(r.comment_count), views: count(r.view_count), seconds: count(r.duration),
   };
