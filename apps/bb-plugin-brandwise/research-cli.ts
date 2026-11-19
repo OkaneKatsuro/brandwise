@@ -1,8 +1,8 @@
-// CLI of research: `bb brandwise research ...`. Reading a company's site and taking its look from a rendered page (the fence
-// around the requests and around the browser, what is taken from a page, what is kept) live in packages/core/src/context; this
-// file parses arguments and prints what was found. The onboarding wizard (skills/product-onboarding) drafts the product pack
+// CLI of research: `bb brandwise research ...`. Reading a company's site, taking its look from a rendered page and reading what
+// it already posts (the fence around the requests and around the browser, what is taken, what is kept) live in
+// packages/core/src/context; this file parses arguments and prints what was found. The onboarding wizard (skills/product-onboarding) drafts the product pack
 // and the look's two files from it.
-import type { LookDigest, SiteDigest } from "./core/context/index.ts";
+import type { ListPosts, LookDigest, SiteDigest, SocialDigest } from "./core/context/index.ts";
 import type { Render } from "./core/context/research.ts";
 import type { Core } from "./core/index.ts";
 
@@ -10,6 +10,8 @@ type Io = {
   val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string; actor: (argv: string[]) => string;
   /** The browser a look is taken with: the Chrome of the optional engine, as the plugin's settings name it at this moment. */
   render: () => Render;
+  /** Lists the posts of a public profile with the tools of this host. */
+  listPosts: ListPosts;
 };
 
 /** What the site wrote, as quoted lines: no line of it can pass for one of ours. */
@@ -61,11 +63,38 @@ const fmtLook = (d: LookDigest) => {
   ].join("\n");
 };
 
-/** `bb brandwise research site <url> [--pages 12] | look <url>`, each with `[--campaign <c>] [--as <label>]` */
-export async function researchCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage, actor, render }: Io) {
+const number = (n: number | null, what: string) => (n === null ? null : `${n.toLocaleString("en")} ${what}`);
+const post = (p: SocialDigest["posts"][number]) => [
+  `${p.publishedAt?.slice(0, 10) ?? "undated"}  ${p.format}  ${[number(p.views, "views"), number(p.likes, "likes"), number(p.comments, "comments")].filter(Boolean).join(", ") || "no public counts"}  ${p.url}`,
+  ...quoted(p.text === "" ? ["(no text)"] : [`${p.text.replaceAll("\n", " / ")}${p.text.length < p.textLength ? "…" : ""}`]),
+];
+
+/** What a profile's posts say together, in numbers counted by code, then the newest posts with the start of their text, quoted. */
+const fmtSocial = (d: SocialDigest) => {
+  const a = d.audit;
+  return [
+    d.notice,
+    `${d.profile.url}: ${a.posts} ${a.posts === 1 ? "post" : "posts"} read${a.from && a.to ? `, from ${a.from.slice(0, 10)} to ${a.to.slice(0, 10)}` : ""}; all of them, whole, in asset ${d.assetId}`,
+    `rhythm: ${a.perWeek === null ? "not known (the posts carry no dates, or too few do)" : `${a.perWeek} posts a week`}`,
+    `formats: ${Object.entries(a.formats).map(([format, n]) => `${format} ${n}`).join(", ")}`,
+    `usual for a post: ${[number(a.usual.views, "views"), number(a.usual.likes, "likes"), number(a.usual.comments, "comments")].filter(Boolean).join(", ") || "the platform shows no counts"}`,
+    ...(a.hashtags.length ? [`hashtags used more than once: ${a.hashtags.map((h) => `${h.tag} (${h.posts})`).join(", ")}`] : []),
+    "", "seen most:", ...a.top.flatMap(post),
+    "", "how the newest posts open:", ...quoted(a.openings),
+    "", "the newest posts:", ...d.posts.flatMap(post),
+  ].join("\n");
+};
+
+/** `bb brandwise research site <url> [--pages 12] | look <url> | social <profile url> [--last 30]`, each with `[--campaign <c>] [--as <label>]` */
+export async function researchCli(c: Core, action: string | undefined, args: string[], { val, positional, reply, usage, actor, render, listPosts }: Io) {
   const [address] = positional(args.slice(2));
-  if ((action !== "site" && action !== "look") || !address) return { exitCode: 1, stderr: usage };
+  if ((action !== "site" && action !== "look" && action !== "social") || !address) return { exitCode: 1, stderr: usage };
   const campaignId = (await c.campaigns.resolve(val(args, "--campaign"))).id;
+  if (action === "social") {
+    const last = val(args, "--last");
+    const social = await c.context.researchSocial(campaignId, address, { list: listPosts, last: last === undefined ? undefined : Number(last), actor: actor(args) });
+    return reply(social, fmtSocial(social));
+  }
   if (action === "look") {
     const look = await c.context.researchLook(campaignId, address, { render: render(), actor: actor(args) });
     return reply(look, fmtLook(look));

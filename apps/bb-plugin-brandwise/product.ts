@@ -5,7 +5,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { DocVersion, LookSource, SiteSource } from "./core/context/index.ts";
+import type { DocVersion, LookSource, SiteSource, SocialSource } from "./core/context/index.ts";
 import type { Core } from "./core/index.ts";
 
 type Io = { val: (argv: string[], name: string) => string | undefined; positional: (argv: string[]) => string[]; reply: (value: unknown, text: string) => { exitCode: number; stdout: string }; usage: string; actor: (argv: string[]) => string };
@@ -20,10 +20,13 @@ const fmt = (v: DocVersion) =>
 /**
  * One source of the pack on a line. A site: its latest read, and what the reader noted about its pages. A page the look was
  * taken from: its latest render, the asset that holds the picture, and what was noted. That page's address is where the
- * browser ended, which the page decides, so it stands in quotes; the notes are words of ours.
+ * browser ended, which the page decides, so it stands in quotes; the notes are words of ours. A profile whose posts were read:
+ * its latest read, how many posts, and the asset that holds them.
  */
-const fmtSource = (s: SiteSource | LookSource) => (s.kind === "site"
+const fmtSource = (s: SiteSource | LookSource | SocialSource) => (s.kind === "site"
   ? `source: ${s.site}  read ${s.readAt.slice(0, 16)}  ${s.pages} ${s.pages === 1 ? "page" : "pages"}${s.notes.length ? `  (on some: ${s.notes.join("; ")})` : ""}`
+  : s.kind === "social"
+  ? `source: ${s.profile}  posts read ${s.readAt.slice(0, 16)}  ${s.note ?? ""}  ${s.assetId === null ? "posts deleted" : `posts: asset ${s.assetId}`}`
   : `source: ${JSON.stringify(s.page)}  look taken ${s.readAt.slice(0, 16)}  ${s.assetId === null ? "picture deleted" : `picture: asset ${s.assetId}`}${s.note === null ? "" : `  (${s.note})`}`);
 
 /** `bb brandwise product list | get [<file>] | set <file> (--body <text> | --file <path>) | history <file> | confirm [<file>] | import [--dir <folder>]` */

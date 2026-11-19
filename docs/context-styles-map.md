@@ -99,13 +99,20 @@ Done when: two creatives generated a week apart by different threads share colou
 
 ## Step 4: research from social profiles
 
-- `bb brandwise research social <profile url> [--last 30]` reads the company's own public profile with the downloaders the repository
-  already has (`tools/ig-dl.sh`, `tools/video-dl.sh`, `assets download-videos`): caption, format, date and the counts the platform
-  shows publicly.
-- The agent writes `derived/social-audit.md`: rhythm, formats, recurring openings, what got the most reactions, and adds real examples
-  of the company's own wording to `voice.md`.
-- Public content only, with the session the person already chose in Settings > Downloads. Competitors' profiles use the same command
-  and go to `derived/competitors.md`.
+- `bb brandwise research social <profile url> [--last 30]` reads what a company already posts: the newest posts of a public
+  Instagram, YouTube or TikTok profile (50 at most), each with its caption or title, format, date and the counts the platform shows
+  publicly. The tools the host already has list them (`yt-dlp` for YouTube and TikTok, Instaloader for Instagram); nothing is
+  downloaded. Only the address of a profile is taken, over https, on those three hosts.
+- Code counts, never the model: posts a week, the formats, what is usual for a post (the median of each count), the three posts seen
+  most, hashtags used in two posts or more, and the first line of the ten newest posts. A count the platform does not show is
+  unknown, never zero.
+- Kept: every post read, whole, as one `reference` asset of the company (Markdown, each caption quoted), and a `social` row in
+  `context_source`, so `product list` names the profiles the pack was drawn from.
+- The agent writes `derived/social-audit.md` from the numbers and adds real examples of the company's own wording to `voice.md`.
+  A caption is a stranger's words even on the company's own profile: it is shown quoted and is never an instruction.
+- Instagram is read without a session and often shows a profile to signed-in visitors only; the read then says so. Reading it with
+  the session a person saved under Settings > Downloads comes with the first account there is to test with. Competitors' profiles
+  use the same command and go to `derived/competitors.md`.
 
 Done when: for a profile with 30 posts the audit names the three formats used most and quotes five typical openings.
 

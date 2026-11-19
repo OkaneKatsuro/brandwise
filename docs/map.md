@@ -15,7 +15,7 @@ column and its place in the column; pixels are the page's business.
 
 | Column | One node per | It says | Read from |
 |---|---|---|---|
-| `source` | site read for the pack | the site, its latest read, how many pages that read took. The page the look was taken from (`research look`) is not a node: `bb brandwise product list` names it | `context_source` |
+| `source` | site read for the pack | the site, its latest read, how many pages that read took. The page the look was taken from (`research look`) and the profiles read (`research social`) are not nodes: `bb brandwise product list` names them | `context_source` |
 | `pack` | company (always one) | the current version of each file and whether a person confirmed it, the look's `design.md` and `design.json` among them once they are written; which of the five files are missing (the look's two are never missing) | `context_doc` |
 | `campaign` | the company and each campaign under it | name, kind, and how many of its creatives and posts the map leaves out | `campaign` |
 | `creative` | asset with the role `creative` | name, kind, the style it was generated from and the prompt, when its provenance has them | `asset` |
