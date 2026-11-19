@@ -10,11 +10,13 @@
 import type { Connector, ScopedTokens } from "./publish.ts";
 import { campaignSlug, tagText, withUtm } from "./email/domain/render.ts";
 import { replaceUrls } from "./links/domain.ts";
+import { counts, FETCH_TIMEOUT_MS, pullByCampaign, type EntryRef, type MetricsSource, type Snapshot } from "./metrics/domain.ts";
 
 const AUTHORIZE = "https://threads.com/oauth/authorize";
 const GRAPH = "https://graph.threads.com";
 const VERSION = "v1.0";
-export const THREADS_SCOPES = ["threads_basic", "threads_content_publish"];
+/** Publishing, and reading the counts of what was published. */
+export const THREADS_SCOPES = ["threads_basic", "threads_content_publish", "threads_manage_insights"];
 export const THREADS_TOKEN_KEY = "threads.accessToken";
 const TEXT_MAX = 500;
 const MB = 1_000_000;
@@ -40,10 +42,10 @@ const messageOf = (json: ApiError, status: number) => json.error?.message ?? jso
 
 /** One Graph call to Threads; the token travels in a header. */
 function graph(f: typeof fetch) {
-  return async <T>(method: "GET" | "POST", path: string, token: string, params: Record<string, string> = {}): Promise<T> => {
+  return async <T>(method: "GET" | "POST", path: string, token: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<T> => {
     const url = new URL(`${GRAPH}/${VERSION}/${path}`);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-    const res = await f(url, { method, headers: { authorization: `Bearer ${token}` } });
+    const res = await f(url, { method, headers: { authorization: `Bearer ${token}` }, signal });
     const json = (await res.json().catch(() => ({}))) as T & ApiError;
     if (!res.ok || json.error) throw new Error(`Threads ${method} /${path}: ${messageOf(json, res.status)}${json.error?.code ? ` (code ${json.error.code})` : ""}`);
     return json;
@@ -155,4 +157,35 @@ export async function threadsStatus(opts: ThreadsOptions, campaignId: string, ta
     `@${profile.username ?? profile.id} (${profile.id}): connected; the token is renewed at each post and ends in ${days} days without one`,
     target ? `threads target: ${JSON.stringify(target)}` : "threads target: none (connect sets it; without it entries wait as Publish by hand)",
   ] };
+}
+
+const MEDIA_ID = /^\d{5,25}$/;
+/** Every way a post is passed on; `shares` of the vocabulary is their sum. */
+const PASSED_ON = ["reposts", "quotes", "shares"] as const;
+
+/**
+ * What Threads counts for the posts this connector published (media insights: https://developers.facebook.com/docs/threads/insights),
+ * with the threads_manage_insights permission of the connection, one request a post. Threads marks `views` and `shares` as in
+ * development: a count it does not answer stays unknown. Replies under replies are not counted by Threads. `app` is the Threads
+ * app as set at the moment of a pull; without one nothing is measured.
+ */
+export function threadsMetrics(app: () => ThreadsOptions | null): MetricsSource {
+  const read = (opts: ThreadsOptions) => async (token: string, [post]: EntryRef[]): Promise<Snapshot[]> => {
+    const answer = await graph(opts.fetchImpl ?? fetch)<{ data?: { name: string; values?: { value?: number }[] }[] }>(
+      "GET", `${post.externalId}/insights`, token, { metric: ["views", "likes", "replies", ...PASSED_ON].join(",") }, AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    ).catch((err: Error) => { throw /permission/i.test(err.message) ? new Error(`${err.message}: the connection may lack threads_manage_insights; add it to the Threads app and connect the account again (docs/channels.md)`) : err; });
+    const counted = new Map((answer.data ?? []).map((m) => [m.name, m.values?.[0]?.value]));
+    const passedOn = PASSED_ON.map((name) => counted.get(name)).filter((n) => n !== undefined);
+    return [{ entryId: post.id, values: counts({ exposures: counted.get("views"), reactions: counted.get("likes"), comments: counted.get("replies"), shares: passedOn.length ? passedOn.reduce((sum, n) => sum + n, 0) : undefined }) }];
+  };
+  return {
+    id: "threads",
+    channels: ["threads"],
+    measures: ["exposures", "reactions", "comments", "shares"],
+    async pull(entries) {
+      const opts = app();
+      if (opts === null) return [];
+      return pullByCampaign(entries.filter((e) => MEDIA_ID.test(e.externalId ?? "")), { size: 1, account: async (campaignId) => (await threadsConnection(opts, campaignId)).token, read: read(opts) });
+    },
+  };
 }

@@ -1,7 +1,9 @@
-// TikTok connector, pure: the OAuth refresh, the Direct Post calls and the chunked upload, on recorded response shapes (no network).
+// TikTok connector, pure: the OAuth refresh, the Direct Post calls, the chunked upload and the counts of posted videos, on
+// recorded response shapes (no network).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chunkPlan, privacyFor, tiktok, tiktokOAuth, tiktokStatus, TIKTOK_TOKEN_KEY } from "./connector-tiktok.ts";
+import { chunkPlan, privacyFor, tiktok, tiktokMetrics, tiktokOAuth, tiktokStatus, TIKTOK_TOKEN_KEY } from "./connector-tiktok.ts";
+import { PartialPullError, type EntryRef } from "./metrics/domain.ts";
 import type { PublishInput, ScopedTokens } from "./publish.ts";
 
 type Call = { method: string; url: string; headers: Record<string, string>; body: unknown };
@@ -118,7 +120,7 @@ test("oauth: the sign-in address carries the scopes and state; a token error is 
   const o = tiktokOAuth({ clientKey: "K", clientSecret: "S" });
   const u = new URL(o.authorizeUrl("https://x.example/oauth/tiktok", "st8"));
   assert.equal(u.origin + u.pathname, "https://www.tiktok.com/v2/auth/authorize/");
-  assert.deepEqual(Object.fromEntries(u.searchParams), { client_key: "K", scope: "user.info.basic,video.publish", response_type: "code", redirect_uri: "https://x.example/oauth/tiktok", state: "st8" });
+  assert.deepEqual(Object.fromEntries(u.searchParams), { client_key: "K", scope: "user.info.basic,video.publish,video.list", response_type: "code", redirect_uri: "https://x.example/oauth/tiktok", state: "st8" });
 
   const bad = fakeTikTok(() => json({ error: "invalid_grant", error_description: "Authorization code is expired." }, 400));
   await assert.rejects(tiktokOAuth({ clientKey: "K", clientSecret: "S" }, bad.fetchImpl).exchange("code", "https://x"), /Authorization code is expired/);
@@ -131,4 +133,52 @@ test("oauth: the sign-in address carries the scopes and state; a token error is 
   assert.match(s.lines[2], /not audited the app yet/);
   assert.match(s.lines[3], /target: none/);
   assert.deepEqual((await tiktokStatus({ clientKey: "K", clientSecret: "S", tokens: memoryTokens(null), fetchImpl: t.fetchImpl }, "c1", null)).lines, ["No TikTok account connected to this campaign: bb brandwise tiktok connect --campaign <c>"]);
+});
+
+const posted = (id: string, externalId: string | null): EntryRef => ({ id, campaignId: "c1", channel: "tiktok", externalId, externalUrl: null });
+
+test("metrics: the counts of the posted videos in one video/query; a post still known by its publish id is not asked about", async () => {
+  const t = fakeTikTok((key, call) => {
+    if (key === "POST /v2/oauth/token/") return tokensReply;
+    // video/query as TikTok answers it: the videos of the account among the ids asked for, counts as numbers
+    if (key === "POST /v2/video/query/") {
+      const ids = (call.body as { filters: { video_ids: string[] } }).filters.video_ids;
+      const all = [{ id: "7301234567890123456", view_count: 1200, like_count: 80, comment_count: 6, share_count: 3 }, { id: "7301234567890123457", view_count: 0, like_count: 0, comment_count: 0, share_count: 0 }];
+      return { data: { videos: all.filter((v) => ids.includes(v.id)) }, error: { code: "ok", message: "", log_id: "20261119" } };
+    }
+    throw new Error(`unexpected ${key}`);
+  });
+  const tokens = memoryTokens("REFRESH-1");
+  const source = tiktokMetrics(() => ({ clientKey: "K", clientSecret: "S", tokens, fetchImpl: t.fetchImpl }));
+  assert.deepEqual([source.id, source.channels, source.measures], ["tiktok", ["tiktok"], ["exposures", "video_views", "reactions", "comments", "shares"]]);
+
+  const snaps = await source.pull!([posted("e1", "7301234567890123456"), posted("e2", "7301234567890123457"), posted("gone", "7301234567890123499"), posted("processing", "v_pub_file~v2-1.7301"), posted("by-hand", null)], new Date());
+  assert.deepEqual(snaps, [
+    { entryId: "e1", values: { exposures: 1200, video_views: 1200, reactions: 80, comments: 6, shares: 3 } },
+    { entryId: "e2", values: { exposures: 0, video_views: 0, reactions: 0, comments: 0, shares: 0 } },
+  ], "a video nobody saw yet is 0, a video TikTok does not answer for has no numbers");
+  const query = t.calls.find((c) => c.url.includes("/v2/video/query/"))!;
+  assert.equal(new URL(query.url).searchParams.get("fields"), "id,view_count,like_count,comment_count,share_count");
+  assert.deepEqual([query.headers.authorization, query.body], ["Bearer ACCESS", { filters: { video_ids: ["7301234567890123456", "7301234567890123457", "7301234567890123499"] } }]);
+  assert.equal(tokens.saved[TIKTOK_TOKEN_KEY], "REFRESH-2", "the rotated refresh token is kept, once for the campaign");
+  assert.equal(t.calls.filter((c) => c.url.includes("/v2/oauth/token/")).length, 1);
+});
+
+test("metrics: more than twenty videos are asked for in several requests; a connection made before counts were read says how to mend it", async () => {
+  const asked: number[] = [];
+  const many = fakeTikTok((key, call) => {
+    if (key === "POST /v2/oauth/token/") return tokensReply;
+    const ids = (call.body as { filters: { video_ids: string[] } }).filters.video_ids;
+    asked.push(ids.length);
+    return { data: { videos: ids.map((id) => ({ id, view_count: 1 })) }, error: { code: "ok", message: "" } };
+  });
+  const entries = Array.from({ length: 45 }, (_, i) => posted(`e${i}`, String(7301234567890123000n + BigInt(i))));
+  assert.equal((await tiktokMetrics(() => ({ clientKey: "K", clientSecret: "S", tokens: memoryTokens("R"), fetchImpl: many.fetchImpl })).pull!(entries, new Date())).length, 45);
+  assert.deepEqual(asked, [20, 20, 5]);
+
+  const old = fakeTikTok((key) => (key === "POST /v2/oauth/token/" ? tokensReply : json({ data: {}, error: { code: "scope_not_authorized", message: "The user did not authorize the scope required for completing this request.", log_id: "x" } }, 401)));
+  const failed = await tiktokMetrics(() => ({ clientKey: "K", clientSecret: "S", tokens: memoryTokens("R"), fetchImpl: old.fetchImpl })).pull!([posted("e1", "7301234567890123456")], new Date()).then(() => null, (err) => err);
+  assert.ok(failed instanceof PartialPullError);
+  assert.deepEqual(failed.errors, ["TikTok /v2/video/query/: The user did not authorize the scope required for completing this request. (scope_not_authorized): the connection has no video.list scope; add it to the TikTok app and connect the account again (docs/channels.md) (1 entry not read)"]);
+  assert.deepEqual(await tiktokMetrics(() => null).pull!([posted("e1", "7301234567890123456")], new Date()), [], "no TikTok app set: nothing is measured");
 });

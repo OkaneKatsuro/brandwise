@@ -8,11 +8,12 @@
 import type { Connector, PublishInput, ScopedTokens } from "./publish.ts";
 import { campaignSlug, tagText, withUtm } from "./email/domain/render.ts";
 import { replaceUrls } from "./links/domain.ts";
+import { counts, FETCH_TIMEOUT_MS, pullByCampaign, type EntryRef, type MetricsSource, type Snapshot } from "./metrics/domain.ts";
 
 const API = "https://open.tiktokapis.com";
 const AUTHORIZE = "https://www.tiktok.com/v2/auth/authorize/";
-/** `video.publish` is Direct Post; `user.info.basic` lets the connection name the account. */
-export const TIKTOK_SCOPES = ["user.info.basic", "video.publish"];
+/** `video.publish` is Direct Post; `user.info.basic` lets the connection name the account; `video.list` reads the counts of its videos. */
+export const TIKTOK_SCOPES = ["user.info.basic", "video.publish", "video.list"];
 export const TIKTOK_TOKEN_KEY = "tiktok.refreshToken";
 const TITLE_MAX = 2200;
 const MB = 1_000_000;
@@ -40,14 +41,14 @@ type Envelope = { error?: { code?: string; message?: string; log_id?: string } }
 
 /** One call of the posting API: JSON in, JSON out; success is HTTP 200 with error.code "ok", anything else is an Error naming the call. */
 function api(f: typeof fetch) {
-  return async <T>(path: string, accessToken: string, body?: unknown): Promise<T> => {
+  return async <T>(path: string, accessToken: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
     const res = await f(`${API}${path}`, {
       method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json; charset=UTF-8" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body), signal,
     });
     const json = (await res.json().catch(() => ({}))) as T & Envelope;
     const code = json.error?.code;
-    if (!res.ok || (code !== undefined && code !== "ok")) throw new Error(`TikTok ${path}: ${json.error?.message ?? `HTTP ${res.status}`}${code && code !== "ok" ? ` (${code})` : ""}`);
+    if (!res.ok || (code !== undefined && code !== "ok")) throw new Error(`TikTok ${path.split("?")[0]}: ${json.error?.message ?? `HTTP ${res.status}`}${code && code !== "ok" ? ` (${code})` : ""}`);
     return json;
   };
 }
@@ -168,4 +169,39 @@ export async function tiktokStatus(opts: TikTokOptions, campaignId: string, targ
     target ? `tiktok target: ${JSON.stringify(target)}` : "tiktok target: none (connect sets it; without it entries wait as Publish by hand)",
   ];
   return { connected: true, creator, lines };
+}
+
+/** video/query takes this many ids a request. */
+const QUERY_CHUNK = 20;
+/** The id of a video. A post TikTok was still processing when it was recorded has its publish id instead, which cannot be asked about. */
+const VIDEO_ID = /^\d{5,25}$/;
+
+/**
+ * What TikTok counts for the videos this connector posted (video/query: https://developers.tiktok.com/doc/tiktok-api-v2-video-query),
+ * with the `video.list` scope of the connection. A view is both the exposure and the video view of a video. TikTok answers for
+ * videos of the connected account only; a video it leaves out (deleted, or another account's) gets no numbers. `app` is the
+ * TikTok app as set at the moment of a pull; without one nothing is measured.
+ */
+export function tiktokMetrics(app: () => TikTokOptions | null): MetricsSource {
+  /** One video/query for videos of one account. */
+  const read = (opts: TikTokOptions) => async (accessToken: string, videos: EntryRef[]): Promise<Snapshot[]> => {
+    const answer = await api(opts.fetchImpl ?? fetch)<{ data?: { videos?: { id: string; view_count?: number; like_count?: number; comment_count?: number; share_count?: number }[] } }>(
+      "/v2/video/query/?fields=id,view_count,like_count,comment_count,share_count", accessToken, { filters: { video_ids: videos.map((v) => v.externalId) } }, AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    ).catch((err: Error) => { throw err.message.includes("scope_not_authorized") ? new Error(`${err.message}: the connection has no video.list scope; add it to the TikTok app and connect the account again (docs/channels.md)`) : err; });
+    const counted = new Map((answer.data?.videos ?? []).map((v) => [v.id, v]));
+    return videos.flatMap((v) => {
+      const c = counted.get(v.externalId!);
+      return c ? [{ entryId: v.id, values: counts({ exposures: c.view_count, video_views: c.view_count, reactions: c.like_count, comments: c.comment_count, shares: c.share_count }) }] : [];
+    });
+  };
+  return {
+    id: "tiktok",
+    channels: ["tiktok"],
+    measures: ["exposures", "video_views", "reactions", "comments", "shares"],
+    async pull(entries) {
+      const opts = app();
+      if (opts === null) return [];
+      return pullByCampaign(entries.filter((e) => VIDEO_ID.test(e.externalId ?? "")), { size: QUERY_CHUNK, account: async (campaignId) => (await tiktokAccessToken(opts, campaignId)).access_token, read: read(opts) });
+    },
+  };
 }

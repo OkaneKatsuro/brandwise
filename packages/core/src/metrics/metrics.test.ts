@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { resendCapabilities } from "../email/adapters/resend.ts";
 import { emailMetricsSource } from "../email/metrics-source.ts";
 import type { CountableEvent, EmailStore, SendRecord } from "../email/domain/ports.ts";
-import { merge, rate } from "./domain.ts";
+import { counts, merge, PartialPullError, pullByCampaign, rate, type EntryRef } from "./domain.ts";
 
 test("merge: one number per metric from the first source that has it, never added up; the start falls back only when no source can tell", () => {
   const m = merge("e1", "telegram", [
@@ -39,4 +39,29 @@ test("e-mail source: counts from events up to the moment asked; a number the pro
   assert.equal("unsubscribes" in late.values, false, "unknown, so the unsubscribe guard is not fooled by a zero");
   const [before] = await src.at!([{ id: "e1", campaignId: "c1", channel: "email", externalId: null, externalUrl: null }], new Date("2026-11-01T08:30:00.000Z"));
   assert.equal(before.startedAt, null, "asked before the send: not started yet");
+});
+
+test("counts: what a platform gave as a count is a number; what it left out or gave as anything else stays unknown", () => {
+  assert.deepEqual(counts({ exposures: "1520", reactions: 87, comments: 0, shares: undefined, saves: null, video_views: "12.5", reach: -1, clicks: "many" }), { exposures: 1520, reactions: 87, comments: 0 });
+});
+
+test("pullByCampaign: an account per campaign, a request per chunk; what failed is reported once with the entries it left unread", async () => {
+  const entry = (id: string, campaignId: string): EntryRef => ({ id, campaignId, channel: "x", externalId: id, externalUrl: null });
+  const entries = [entry("a1", "a"), entry("a2", "a"), entry("a3", "a"), entry("b1", "b"), entry("b2", "b"), entry("c1", "c"), entry("c2", "c"), entry("c3", "c")];
+  const opened: string[] = [], asked: string[][] = [];
+  const pull = () => pullByCampaign(entries, {
+    size: 2,
+    account: async (campaignId) => { opened.push(campaignId); if (campaignId === "b") throw new Error("not connected"); return `token-${campaignId}`; },
+    read: async (token, chunk) => {
+      asked.push([token, ...chunk.map((e) => e.id)]);
+      if (token === "token-c") throw new Error("refused");
+      return chunk.map((e) => ({ entryId: e.id, values: { exposures: 1 } }));
+    },
+  });
+  const failed = await pull().then(() => null, (err) => err);
+  assert.ok(failed instanceof PartialPullError);
+  assert.deepEqual(failed.snapshots.map((x) => x.entryId), ["a1", "a2", "a3"]);
+  assert.deepEqual(failed.errors, ["not connected (2 entries not read)", "refused (3 entries not read)"], "the same refusal of two requests is one line");
+  assert.deepEqual([opened, asked], [["a", "b", "c"], [["token-a", "a1", "a2"], ["token-a", "a3"], ["token-c", "c1", "c2"], ["token-c", "c3"]]], "an account is opened once for its campaign");
+  assert.deepEqual(await pullByCampaign([], { size: 2, account: async () => 1, read: async () => [] }), []);
 });

@@ -21,7 +21,10 @@ import { createStylesRpc, stylesContract } from "./styles.ts";
 import { createEmailTemplates, templatesContract } from "./email-templates.ts";
 import { sleep, slug } from "./util.ts";
 import { connectorsFrom, runDue, SHORTENED_CHANNELS, type ScopedTokens } from "./core/publish.ts";
-import { metaStatus } from "./core/connector-meta.ts";
+import { instagramMetrics, metaStatus } from "./core/connector-meta.ts";
+import { threadsMetrics } from "./core/connector-threads.ts";
+import { tiktokMetrics } from "./core/connector-tiktok.ts";
+import { youtubeMetrics } from "./core/connector-youtube.ts";
 import { createConnections } from "./connect.ts";
 import { clientAddress, createLinks, redirectLimiter, REDIRECT_LIMIT } from "./core/links/index.ts";
 import { ga4Source, parseServiceAccount } from "./core/site/ga4.ts";
@@ -256,7 +259,7 @@ export default async function plugin(bb: BbPluginApi) {
       telegramBotToken: { type: "string", label: "Telegram bot token", description: "From @BotFather. Switches the telegram channel on; each campaign picks its chat (campaign channel set telegram chatId=...).", default: "", secret: true },
     }),
     section("social", "Social channels", "Accounts the BrandWise posts to. One token per platform, set by a person (docs/channels.md); each campaign picks its Page or account with a channel target.", {
-      metaPublishToken: { type: "string", label: "Meta publish token", description: "A system-user token of the client's business with pages_manage_posts, pages_read_engagement, instagram_basic and instagram_content_publish on its Pages and Instagram accounts. Switches the facebook and instagram channels on; `bb brandwise meta test` lists the Pages and accounts and their ids for the campaign targets.", default: "", secret: true },
+      metaPublishToken: { type: "string", label: "Meta publish token", description: "A system-user token of the client's business with pages_manage_posts, pages_read_engagement, instagram_basic and instagram_content_publish on its Pages and Instagram accounts, and instagram_manage_insights for the numbers of Instagram posts. Switches the facebook and instagram channels on; `bb brandwise meta test` lists the Pages and accounts and their ids for the campaign targets.", default: "", secret: true },
       tiktokClientKey: { type: "string", label: "TikTok client key", description: "Of the app on developers.tiktok.com with the Content Posting API (Direct Post). With the secret it switches the tiktok channel on; each campaign then connects its creator account with `bb brandwise tiktok connect`. The app's redirect URI must be <public address>/oauth/tiktok.", default: "" },
       tiktokClientSecret: { type: "string", label: "TikTok client secret", description: "Of the same app.", default: "", secret: true },
       youtubeClientId: { type: "string", label: "Google OAuth client id", description: "Of a Web application client in Google Cloud with the YouTube Data API v3 enabled. With the secret it switches the youtube channel on; each campaign then connects its channel with `bb brandwise youtube connect`. The client's redirect URI must be http://localhost:<this bb's port>/api/v1/plugins/brandwise/http/oauth/youtube.", default: "" },
@@ -355,14 +358,6 @@ export default async function plugin(bb: BbPluginApi) {
     const e = await need().calendar.get(id);
     if (e?.channel === META_CHANNEL && !adIdOf({ externalId })) throw new Error(`"${externalId}" is not a Meta ad id: give the ad's numeric id (Ads Manager > the ad > ID), not the account or campaign id`);
   };
-  const metrics = core === null ? null : createMetrics({ core, sources: [...(email ? [email.metricsSource()] : []), meta, ...(links ? [links.metricsSource()] : []), ...(ga4 ? [ga4] : [])] });
-  // The editor-in-chief regulator (rails, signals, experiments, journal, tasks) and the development clock.
-  const regulator = core !== null && metrics !== null ? createRegulator({ core, metrics, library: () => emailTemplates.library() }) : null;
-  const editorCli = createEditorCli({ core: need, regulator: () => regulator });
-  /** The moment numbers are read as of: the regulator's clock, which is the development clock while a simulated world runs. */
-  const now = async () => (regulator ? regulator.clock.now() : new Date());
-  const metricsCli = createMetricsCli({ core: need, metrics: () => metrics, links: () => links, now });
-  /** Every publishing connector that is switched on. A channel without one waits as "Publish by hand". */
   // Accounts connected over OAuth (TikTok, YouTube): their refresh tokens are scoped secret settings of the campaign (docs/channels.md).
   const tokens: ScopedTokens = {
     get: async (campaignId, key) => { const r = await need().settings.resolve(campaignId, key); return r && r.scope !== "default" && typeof r.value === "string" && r.value ? r.value : null; },
@@ -372,6 +367,19 @@ export default async function plugin(bb: BbPluginApi) {
   const youtubeApp = () => (cfg.youtubeClientId.trim() && cfg.youtubeClientSecret.trim() ? { clientId: cfg.youtubeClientId.trim(), clientSecret: cfg.youtubeClientSecret.trim(), tokens } : null);
   const threadsApp = () => (cfg.threadsAppId.trim() && cfg.threadsAppSecret.trim() ? { appId: cfg.threadsAppId.trim(), appSecret: cfg.threadsAppSecret.trim(), tokens } : null);
   const linkedinApp = () => (cfg.linkedinClientId.trim() && cfg.linkedinClientSecret.trim() ? { clientId: cfg.linkedinClientId.trim(), clientSecret: cfg.linkedinClientSecret.trim(), version: cfg.linkedinApiVersion.trim() || undefined, tokens } : null);
+  // What the platforms count for the posts the connectors published (docs/analytics.md, step 6): each asks with the credentials
+  // of the moment, so a platform that is not set up measures nothing.
+  const postCounts = [
+    youtubeMetrics(youtubeApp), tiktokMetrics(tiktokApp), threadsMetrics(threadsApp),
+    instagramMetrics(() => (cfg.metaPublishToken.trim() ? { token: cfg.metaPublishToken.trim(), version: cfg.metaApiVersion.trim() || undefined } : null)),
+  ];
+  const metrics = core === null ? null : createMetrics({ core, sources: [...(email ? [email.metricsSource()] : []), meta, ...postCounts, ...(links ? [links.metricsSource()] : []), ...(ga4 ? [ga4] : [])] });
+  // The editor-in-chief regulator (rails, signals, experiments, journal, tasks) and the development clock.
+  const regulator = core !== null && metrics !== null ? createRegulator({ core, metrics, library: () => emailTemplates.library() }) : null;
+  const editorCli = createEditorCli({ core: need, regulator: () => regulator });
+  /** The moment numbers are read as of: the regulator's clock, which is the development clock while a simulated world runs. */
+  const now = async () => (regulator ? regulator.clock.now() : new Date());
+  const metricsCli = createMetricsCli({ core: need, metrics: () => metrics, links: () => links, now });
   const connections = createConnections({
     core: need, kv: bb.storage.kv, loopbackBaseUrl: () => bb.server.loopbackBaseUrl,
     publicBaseUrl: () => cfg.linksBaseUrl.trim().replace(/\/+$/, "").replace(/\/l$/, "") || null,
@@ -379,6 +387,7 @@ export default async function plugin(bb: BbPluginApi) {
   });
   // the platforms' return addresses: public by nature (the one-time state in the query is what ties a callback to a campaign)
   for (const id of connections.platforms) bb.http.route("GET", `/oauth/${id}`, (ctx) => connections.callback(id, { query: (name) => ctx.req.query(name) }), { auth: "none" });
+  /** Every publishing connector that is switched on. A channel without one waits as "Publish by hand". */
   const allConnectors = () => [...connectorsFrom(cfg, { shorten: links?.enabled() ? links.shorten : undefined, tokens }), ...(email && email.providers.length > 0 ? [email.connector()] : [])];
   // The short-link redirect. Public by nature, so no bb login: a code carries our signature, a code we did not issue is a 404, and the
   // target is only ever a URL we stored when publishing (no open redirect). Previews and crawlers are recorded as bots, not clicks.

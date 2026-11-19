@@ -58,7 +58,8 @@ and Instagram accounts a person assigns to it, and no login flow runs on the Bra
 3. **Assign assets** to the system user: the Page (task *Create content*, or full control) and the Instagram account (*Content*). An
    Instagram account appears here only when it is linked to a Page of the portfolio and added under Accounts > Instagram accounts.
 4. **Generate the token**: on the system user, *Generate token* > choose the app > expiry *Never* > permissions
-   `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`, `instagram_content_publish`. Copy it: Meta
+   `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`, `instagram_content_publish`, and
+   `instagram_manage_insights` for the numbers of Instagram posts. Copy it: Meta
    shows it once.
 5. **Give it to the BrandWise**: Settings > Social channels > *Meta publish token*; or `META_PUBLISH_TOKEN=...` in `.env` and
    `infra/bb-instance/provision.sh apply`. The value is stored as a secret; `bb plugin config brandwise` shows `[set]`, never the token.
@@ -91,8 +92,9 @@ From now on an approved entry on `facebook` or `instagram` is posted when its ti
   shortened link appended as text (links in captions are not clickable). Meta fetches the file from the asset's **signed storage URL**,
   so the storage must be reachable from the internet: production S3 or R2 works, the local emulator of `pnpm infra:up` does not
   (Instagram entries fail there with Meta's download error).
-- The calendar records the post id and address (`https://www.facebook.com/<post id>`, the Instagram permalink). Metrics of these posts
-  are the next step of `analytics.md` (step 6); until then they have no numbers.
+- The calendar records the post id and address (`https://www.facebook.com/<post id>`, the Instagram permalink). The hourly metrics pull
+  reads the views, reach, likes, comments, shares and saves of each Instagram post (`analytics.md`, step 6). Facebook Page posts have
+  no numbers yet.
 - A failed post is retried twice, then shown as Failed with Meta's message, as with every connector.
 
 ### App review, limits, revocation
@@ -122,7 +124,8 @@ day** per Google Cloud project, whatever the file size.
 
 1. **Google Cloud project**: console.cloud.google.com > New project (any name). APIs & Services > Library > enable **YouTube Data API v3**.
 2. **OAuth consent screen** (APIs & Services > OAuth consent screen): user type *External*, app name, support e-mail. Add the scopes
-   `youtube.upload` and `youtube.readonly`. Then set the **publishing status to "In production"**: while it is "Testing", Google expires
+   `youtube.upload` and `youtube.readonly` (the second also reads the views, likes and comments of uploaded videos for the hourly
+   metrics pull). Then set the **publishing status to "In production"**: while it is "Testing", Google expires
    every refresh token after seven days and the connection dies weekly. The app stays *unverified*: at sign-in Google shows a warning page
    ("Google hasn't verified this app" > Advanced > Go to ...); that is expected for an app used by one brand. Verification is only needed to
    serve many Google accounts.
@@ -163,7 +166,8 @@ level TikTok offers that account; a `privacy=PUBLIC_TO_EVERYONE` the account can
 1. **App** at developers.tiktok.com > Manage apps > Connect an app. Fill in the basics (name, icon, category, description, terms and
    privacy policy URLs; TikTok reviews these before the app can be used by others).
 2. Add the products **Login Kit** and **Content Posting API**; under Content Posting API turn on **Direct Post**. Scopes: `user.info.basic`,
-   `video.publish`.
+   `video.publish`, and `video.list` for the views, likes, comments and shares of posted videos. An account connected before
+   `video.list` was asked for is connected again once; the metrics pull says so.
 3. **Login Kit > Redirect URI**: `<public address>/oauth/tiktok`, where the public address is the one short links use without its `/l`,
    e.g. `https://deposits-classics-otherwise-receipt.trycloudflare.com/oauth/tiktok` for the test tunnel (it changes at every start of
    the tunnel; a production proxy has a fixed one). TikTok takes https addresses only, up to ten of them.
@@ -185,8 +189,8 @@ it may post and the `tiktok` target (`openId`, `username`). To disconnect: clear
 ### Known gaps
 
 - Photo posts, drafts to the inbox (`video.upload`) and the brand-content toggles are not implemented.
-- A post TikTok is still processing after two minutes is recorded by its publish id without an address; the address comes with the
-  metrics step once the post is public.
+- A post TikTok is still processing after two minutes is recorded by its publish id without an address, and gets no numbers: TikTok
+  is asked about videos by their video id.
 
 ## Threads
 
@@ -206,7 +210,10 @@ so an account that posts at least once in 60 days stays connected; one that does
    in the Threads app, Settings > Account > **Website permissions**. Without this, sign-in fails while the app is unreviewed.
 4. Copy the Threads app id and secret into Settings > Social channels (or `THREADS_APP_ID` and `THREADS_APP_SECRET` in `.env`, then
    `provision.sh apply`).
-5. **App Review** is needed only to post for accounts that are not testers of the app (permission `threads_content_publish`, Advanced Access).
+5. **Permissions** asked at connection: `threads_basic`, `threads_content_publish`, and `threads_manage_insights` for the views,
+   likes, replies and reposts of published posts. An account connected before the last one was asked for is connected again once;
+   the metrics pull says so. **App Review** is needed only for accounts that are not testers of the app (Advanced Access for
+   `threads_content_publish` and `threads_manage_insights`).
 
 ### Connect an account (per brand)
 
@@ -256,4 +263,5 @@ The member opens the printed address, signs in, allows access; the page then say
 ### Known gaps
 
 - Company Page authorship (needs the Community Management API), documents and polls, several images per post.
+- Post numbers are not read: member post statistics need the permission `r_member_postAnalytics` and one request per metric.
 - The member id comes from OpenID Connect's `sub`; the first live post confirms LinkedIn accepts it as `urn:li:person:<sub>`.

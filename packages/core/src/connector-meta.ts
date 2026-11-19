@@ -10,6 +10,7 @@
 import type { Connector, PublishInput } from "./publish.ts";
 import { campaignSlug, tagText, withUtm } from "./email/domain/render.ts";
 import { replaceUrls } from "./links/domain.ts";
+import { counts, FETCH_TIMEOUT_MS, pullByCampaign, type EntryRef, type MetricsSource, type Snapshot } from "./metrics/domain.ts";
 
 const GRAPH = "https://graph.facebook.com";
 const GRAPH_VIDEO = "https://graph-video.facebook.com"; // uploads of video bytes go to this host
@@ -38,11 +39,11 @@ type GraphError = { error?: { message?: string; code?: number; error_subcode?: n
 function graph(opts: MetaOptions) {
   const f = opts.fetchImpl ?? fetch;
   const version = opts.version?.trim() || DEFAULT_VERSION;
-  return async <T>(path: string, init: { method?: "GET" | "POST"; token?: string; params?: Record<string, string>; form?: FormData; host?: string } = {}): Promise<T> => {
+  return async <T>(path: string, init: { method?: "GET" | "POST"; token?: string; params?: Record<string, string>; form?: FormData; host?: string; signal?: AbortSignal } = {}): Promise<T> => {
     const url = new URL(`${init.host ?? GRAPH}/${version}/${path}`);
     for (const [k, v] of Object.entries(init.params ?? {})) url.searchParams.set(k, v);
     const method = init.method ?? (init.form ? "POST" : "GET");
-    const res = await f(url, { method, headers: { authorization: `Bearer ${init.token ?? opts.token}` }, body: init.form });
+    const res = await f(url, { method, headers: { authorization: `Bearer ${init.token ?? opts.token}` }, body: init.form, signal: init.signal });
     const json = (await res.json().catch(() => ({}))) as T & GraphError;
     if (!res.ok || json.error) {
       const e = json.error ?? {};
@@ -145,6 +146,35 @@ function instagram(opts: MetaOptions): Connector {
       const mediaId = (await call<{ id: string }>(`${igId}/media_publish`, { method: "POST", params: { creation_id: container } })).id;
       const permalink = await call<{ permalink?: string }>(mediaId, { params: { fields: "permalink" } }).then((r) => r.permalink, () => undefined);
       return { externalId: mediaId, url: permalink };
+    },
+  };
+}
+
+const MEDIA_ID = /^\d{5,25}$/;
+
+/**
+ * What Instagram counts for the posts this connector published (IG Media Insights:
+ * https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights), one request a post, with the
+ * instagram_manage_insights permission of the token. `views` are the exposures of a photo and of a Reel alike; Instagram marks
+ * them as in development and `reach` as estimated. A count it does not answer stays unknown. `app` is the Meta token as set at
+ * the moment of a pull, the same for every campaign; without one nothing is measured.
+ */
+export function instagramMetrics(app: () => MetaOptions | null): MetricsSource {
+  const read = (opts: MetaOptions) => async (_token: string, [post]: EntryRef[]): Promise<Snapshot[]> => {
+    const answer = await graph(opts)<{ data?: { name: string; values?: { value?: number }[]; total_value?: { value?: number } }[] }>(
+      `${post.externalId}/insights`, { params: { metric: "views,reach,likes,comments,shares,saved" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
+    ).catch((err: Error) => { throw /\(code (10|200)\b/.test(err.message) ? new Error(`${err.message}: the token may lack instagram_manage_insights (docs/channels.md)`) : err; });
+    const counted = new Map((answer.data ?? []).map((m) => [m.name, m.values?.[0]?.value ?? m.total_value?.value]));
+    return [{ entryId: post.id, values: counts({ exposures: counted.get("views"), reach: counted.get("reach"), reactions: counted.get("likes"), comments: counted.get("comments"), shares: counted.get("shares"), saves: counted.get("saved") }) }];
+  };
+  return {
+    id: "instagram",
+    channels: ["instagram"],
+    measures: ["exposures", "reach", "reactions", "comments", "shares", "saves"],
+    async pull(entries) {
+      const opts = app();
+      if (opts === null) return [];
+      return pullByCampaign(entries.filter((e) => MEDIA_ID.test(e.externalId ?? "")), { size: 1, account: async () => opts.token, read: read(opts) });
     },
   };
 }

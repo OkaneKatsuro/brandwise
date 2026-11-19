@@ -1,8 +1,10 @@
-// YouTube connector, pure: the OAuth refresh and the resumable upload, on recorded response shapes (no network).
+// YouTube connector, pure: the OAuth refresh, the resumable upload and the counts of uploaded videos, on recorded response shapes
+// (no network).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { campaignSlug } from "./email/domain/render.ts";
-import { youtube, youtubeOAuth, youtubeStatus, YOUTUBE_TOKEN_KEY } from "./connector-youtube.ts";
+import { youtube, youtubeMetrics, youtubeOAuth, youtubeStatus, YOUTUBE_TOKEN_KEY } from "./connector-youtube.ts";
+import { PartialPullError, type EntryRef } from "./metrics/domain.ts";
 import type { PublishInput, ScopedTokens } from "./publish.ts";
 
 type Call = { method: string; url: string; headers: Record<string, string>; body: unknown };
@@ -92,4 +94,55 @@ test("oauth: the sign-in address asks for a refresh token; the exchange and refr
 
   const bad = fakeGoogle(() => json({ error: "invalid_grant", error_description: "Bad Request" }, 400));
   await assert.rejects(youtubeOAuth(app, bad.fetchImpl).refresh("old"), /oauth token: Bad Request/);
+});
+
+const published = (id: string, campaignId: string, externalId: string | null): EntryRef => ({ id, campaignId, channel: "youtube", externalId, externalUrl: null });
+/** A channel per campaign: c1 and c2 are connected, any other campaign is not. */
+const channels: ScopedTokens = { get: async (campaignId) => ({ c1: "REFRESH-1", c2: "REFRESH-2" })[campaignId] ?? null, set: async () => {} };
+
+test("metrics: the counts of the uploaded videos, one request per campaign's channel; a count YouTube leaves out stays unknown", async () => {
+  // videos.list?part=statistics as YouTube answers it: counts are strings, likeCount is absent when the channel hides likes,
+  // a deleted video is not among the items
+  const statistics: Record<string, Record<string, string>> = {
+    dQw4w9WgXcQ: { viewCount: "1520", likeCount: "87", favoriteCount: "0", commentCount: "12" },
+    "hidden-like": { viewCount: "40", favoriteCount: "0", commentCount: "0" },
+    "other-chan1": { viewCount: "7", likeCount: "1", favoriteCount: "0", commentCount: "0" },
+  };
+  const g = fakeGoogle((key, call) => {
+    if (key === "POST https://oauth2.googleapis.com/token") return { access_token: `ACCESS-${(call.body as Record<string, string>).refresh_token}`, expires_in: 3599 };
+    if (key === "GET https://www.googleapis.com/youtube/v3/videos") {
+      const ids = new URL(call.url).searchParams.get("id")!.split(",");
+      return { kind: "youtube#videoListResponse", items: ids.filter((id) => id in statistics).map((id) => ({ kind: "youtube#video", id, statistics: statistics[id] })), pageInfo: { totalResults: ids.length, resultsPerPage: ids.length } };
+    }
+    throw new Error(`unexpected ${key}`);
+  });
+  const source = youtubeMetrics(() => ({ ...app, tokens: channels, fetchImpl: g.fetchImpl }));
+  assert.deepEqual([source.id, source.channels, source.measures], ["youtube", ["youtube"], ["exposures", "video_views", "reactions", "comments"]]);
+
+  const entries = [published("e1", "c1", "dQw4w9WgXcQ"), published("e2", "c1", "hidden-like"), published("e3", "c1", "deleted-vid"), published("by-hand", "c1", null), published("e4", "c2", "other-chan1"), published("e5", "c3", "no-channel1")];
+  const pull = await source.pull!(entries, new Date()).then(() => null, (err) => err);
+  assert.ok(pull instanceof PartialPullError, "one campaign without a channel does not lose the numbers of the others");
+  assert.deepEqual(pull.snapshots, [
+    { entryId: "e1", values: { exposures: 1520, video_views: 1520, reactions: 87, comments: 12 } },
+    { entryId: "e2", values: { exposures: 40, video_views: 40, comments: 0 } },
+    { entryId: "e4", values: { exposures: 7, video_views: 7, reactions: 1, comments: 0 } },
+  ]);
+  assert.deepEqual(pull.errors, ["This campaign has no YouTube channel: a person runs bb brandwise youtube connect --campaign <c> (docs/channels.md) (1 entry not read)"]);
+  const asked = g.calls.filter((c) => c.url.includes("/youtube/v3/videos"));
+  assert.deepEqual(asked.map((c) => [new URL(c.url).searchParams.get("part"), new URL(c.url).searchParams.get("id"), c.headers.authorization]), [["statistics", "dQw4w9WgXcQ,hidden-like,deleted-vid", "Bearer ACCESS-REFRESH-1"], ["statistics", "other-chan1", "Bearer ACCESS-REFRESH-2"]]);
+});
+
+test("metrics: what YouTube refuses is reported with how many entries it left unread", async () => {
+  const g = fakeGoogle((key) => {
+    if (key === "POST https://oauth2.googleapis.com/token") return { access_token: "ACCESS", expires_in: 3599 };
+    return json({ error: { code: 403, message: "The request cannot be completed because you have exceeded your quota.", errors: [{ reason: "quotaExceeded" }] } }, 403);
+  });
+  const source = youtubeMetrics(() => ({ ...app, tokens: channels, fetchImpl: g.fetchImpl }));
+  await assert.rejects(source.pull!([published("e1", "c1", "dQw4w9WgXcQ"), published("e2", "c1", "hidden-like")], new Date()), (err: unknown) => {
+    assert.ok(err instanceof PartialPullError);
+    assert.deepEqual([err.snapshots, err.errors], [[], ["YouTube videos.list: The request cannot be completed because you have exceeded your quota. (quotaExceeded) (2 entries not read)"]]);
+    return true;
+  });
+  assert.deepEqual(await source.pull!([published("by-hand", "c1", null)], new Date()), [], "nothing to ask about, nothing asked");
+  assert.deepEqual(await youtubeMetrics(() => null).pull!([published("e1", "c1", "dQw4w9WgXcQ")], new Date()), [], "no Google client set: nothing is measured");
 });

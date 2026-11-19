@@ -58,6 +58,39 @@ export class PartialPullError extends Error {
 /** Calls to platforms give up after this long, so one hanging answer cannot hold a pull until the automation's own timeout. */
 export const FETCH_TIMEOUT_MS = 30_000;
 
+/** The counts a platform gave, as numbers. What it left out, or gave as anything but a count, stays unknown: never a zero. */
+export function counts(given: Partial<Record<MetricName, unknown>>): Snapshot["values"] {
+  const out: Snapshot["values"] = {};
+  for (const [name, raw] of Object.entries(given) as [MetricName, unknown][]) {
+    const n = typeof raw === "string" && /^\d{1,15}$/.test(raw) ? Number(raw) : raw;
+    if (typeof n === "number" && Number.isFinite(n) && n >= 0) out[name] = n;
+  }
+  return out;
+}
+
+/**
+ * A pull of a platform where every campaign has an account of its own: `account` opens the campaign's (a token), `read` asks for
+ * `size` of its entries at a time. What answered with a number is kept. An account that does not open and a request that fails
+ * are reported with how many entries they left unread, the same message once (PartialPullError), so one campaign's expired
+ * connection or one refused post does not lose the numbers of the rest.
+ */
+export async function pullByCampaign<A>(entries: EntryRef[], opts: { size: number; account: (campaignId: string) => Promise<A>; read: (account: A, entries: EntryRef[]) => Promise<Snapshot[]> }): Promise<Snapshot[]> {
+  const byCampaign = new Map<string, EntryRef[]>();
+  for (const e of entries) byCampaign.set(e.campaignId, [...(byCampaign.get(e.campaignId) ?? []), e]);
+  const out: Snapshot[] = [], unread = new Map<string, number>();
+  const failed = (err: unknown, n: number) => { const why = err instanceof Error ? err.message : String(err); unread.set(why, (unread.get(why) ?? 0) + n); };
+  for (const [campaignId, mine] of byCampaign) {
+    let account: A;
+    try { account = await opts.account(campaignId); } catch (err) { failed(err, mine.length); continue; }
+    for (let i = 0; i < mine.length; i += opts.size) {
+      const chunk = mine.slice(i, i + opts.size);
+      try { out.push(...(await opts.read(account, chunk)).filter((snap) => Object.keys(snap.values).length > 0)); } catch (err) { failed(err, chunk.length); }
+    }
+  }
+  if (unread.size) throw new PartialPullError(out, [...unread].map(([why, n]) => `${why} (${n} ${n === 1 ? "entry" : "entries"} not read)`));
+  return out;
+}
+
 /** An entry's numbers merged over every source that measures its channel; `sources` says where each number came from. */
 export type EntryMetrics = { entryId: string; channel: string; startedAt: string | null; values: Partial<Record<MetricName, number>>; sources: Partial<Record<MetricName, string>> };
 

@@ -1,8 +1,10 @@
-// Threads connector, pure: the token exchange and renewal, the container flow, on recorded response shapes (no network).
+// Threads connector, pure: the token exchange and renewal, the container flow and the counts of published posts, on recorded
+// response shapes (no network).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { campaignSlug } from "./email/domain/render.ts";
-import { threads, threadsConnection, threadsOAuth, threadsStatus, THREADS_TOKEN_KEY, type ThreadsConnection } from "./connector-threads.ts";
+import { threads, threadsConnection, threadsMetrics, threadsOAuth, threadsStatus, THREADS_TOKEN_KEY, type ThreadsConnection } from "./connector-threads.ts";
+import { PartialPullError, type EntryRef } from "./metrics/domain.ts";
 import type { PublishInput, ScopedTokens } from "./publish.ts";
 
 type Call = { method: string; url: URL; auth: string | null; body: unknown };
@@ -97,7 +99,7 @@ test("refusals: no target, wrong media type, too long, an expired connection, a 
 test("oauth: the sign-in address, the two-step exchange to a 60-day token, and status", async () => {
   const u = new URL(threadsOAuth(app).authorizeUrl("https://x.example/oauth/threads", "st8"));
   assert.equal(u.origin + u.pathname, "https://threads.com/oauth/authorize");
-  assert.deepEqual(Object.fromEntries(u.searchParams), { client_id: "APP", redirect_uri: "https://x.example/oauth/threads", scope: "threads_basic,threads_content_publish", response_type: "code", state: "st8" });
+  assert.deepEqual(Object.fromEntries(u.searchParams), { client_id: "APP", redirect_uri: "https://x.example/oauth/threads", scope: "threads_basic,threads_content_publish,threads_manage_insights", response_type: "code", state: "st8" });
 
   const t = fakeThreads((key) => {
     if (key === "POST /oauth/access_token") return { access_token: "SHORT", token_type: "bearer", user_id: 17841405793187218 };
@@ -117,4 +119,42 @@ test("oauth: the sign-in address, the two-step exchange to a 60-day token, and s
 
   const bad = fakeThreads(() => json({ error_type: "OAuthException", code: 400, error_message: "Matching code was not found or was already used" }, 400));
   await assert.rejects(threadsOAuth(app, bad.fetchImpl).exchange("x", "https://x"), /oauth\/access_token: Matching code was not found/);
+});
+
+const published = (id: string, externalId: string | null): EntryRef => ({ id, campaignId: "c1", channel: "threads", externalId, externalUrl: null });
+/** One metric of media insights as Threads answers it. */
+const insight = (media: string, name: string, value: number) => ({ name, period: "lifetime", values: [{ value }], title: name, description: "", id: `${media}/insights/${name}/lifetime` });
+
+test("metrics: the insights of each published post; reposts, quotes and shares together are how often it was passed on", async () => {
+  const t = fakeThreads((key) => {
+    if (key === "GET /v1.0/17890000000000001/insights") return { data: [insight("17890000000000001", "views", 900), insight("17890000000000001", "likes", 100), insight("17890000000000001", "replies", 10), insight("17890000000000001", "reposts", 4), insight("17890000000000001", "quotes", 1), insight("17890000000000001", "shares", 2)] };
+    // views and shares are in development: Threads may leave them out
+    if (key === "GET /v1.0/17890000000000002/insights") return { data: [insight("17890000000000002", "likes", 3), insight("17890000000000002", "replies", 0), insight("17890000000000002", "reposts", 0), insight("17890000000000002", "quotes", 0)] };
+    if (key === "GET /v1.0/17890000000000003/insights") return { data: [] };
+    if (key === "GET /v1.0/17890000000000004/insights") return json({ error: { message: "Unsupported get request. Object with ID '17890000000000004' does not exist", type: "THApiException", code: 100 } }, 400);
+    throw new Error(`unexpected ${key}`);
+  });
+  const source = threadsMetrics(() => ({ ...app, tokens: memoryTokens(fresh), fetchImpl: t.fetchImpl, now: () => NOW }));
+  assert.deepEqual([source.id, source.channels, source.measures], ["threads", ["threads"], ["exposures", "reactions", "comments", "shares"]]);
+
+  const failed = await source.pull!([published("e1", "17890000000000001"), published("e2", "17890000000000002"), published("empty", "17890000000000003"), published("deleted", "17890000000000004"), published("by-hand", null)], NOW).then(() => null, (err) => err);
+  assert.ok(failed instanceof PartialPullError, "a deleted post does not lose the numbers of the others");
+  assert.deepEqual(failed.snapshots, [
+    { entryId: "e1", values: { exposures: 900, reactions: 100, comments: 10, shares: 7 } },
+    { entryId: "e2", values: { reactions: 3, comments: 0, shares: 0 } },
+  ], "views Threads did not answer stay unknown; an answer without a number is no snapshot");
+  assert.deepEqual(failed.errors, ["Threads GET /17890000000000004/insights: Unsupported get request. Object with ID '17890000000000004' does not exist (code 100) (1 entry not read)"]);
+  const first = t.calls[0];
+  assert.deepEqual([first.url.origin, first.url.searchParams.get("metric"), first.auth], ["https://graph.threads.com", "views,likes,replies,reposts,quotes,shares", "Bearer LONG"]);
+});
+
+test("metrics: a connection without the insights permission says how to mend it, once for all its posts; no app, no numbers", async () => {
+  const t = fakeThreads(() => json({ error: { message: "Application does not have permission for this action", type: "THApiException", code: 10 } }, 403));
+  const failed = await threadsMetrics(() => ({ ...app, tokens: memoryTokens(fresh), fetchImpl: t.fetchImpl, now: () => NOW })).pull!([published("e1", "17890000000000001"), published("e2", "17890000000000002")], NOW).then(() => null, (err) => err);
+  assert.ok(failed instanceof PartialPullError);
+  assert.equal(failed.errors.length, 2, "each post names its own request");
+  assert.match(failed.errors[0], /Application does not have permission for this action \(code 10\): the connection may lack threads_manage_insights; add it to the Threads app and connect the account again \(docs\/channels\.md\) \(1 entry not read\)$/);
+  assert.deepEqual(await threadsMetrics(() => null).pull!([published("e1", "17890000000000001")], NOW), []);
+  const none = await threadsMetrics(() => ({ ...app, tokens: memoryTokens(null), fetchImpl: t.fetchImpl, now: () => NOW })).pull!([published("e1", "17890000000000001"), published("e2", "17890000000000002")], NOW).then(() => null, (err) => err);
+  assert.deepEqual(none.errors, ["This campaign has no Threads account: a person runs bb brandwise threads connect --campaign <c> (docs/channels.md) (2 entries not read)"]);
 });

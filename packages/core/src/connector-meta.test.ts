@@ -1,8 +1,10 @@
-// Meta connectors, pure: the Graph API calls Facebook and Instagram posts make, on recorded response shapes (no network).
+// Meta connectors, pure: the Graph API calls Facebook and Instagram posts make and the counts of Instagram posts, on recorded
+// response shapes (no network).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { campaignSlug } from "./email/domain/render.ts";
-import { meta, metaStatus } from "./connector-meta.ts";
+import { instagramMetrics, meta, metaStatus } from "./connector-meta.ts";
+import { PartialPullError, type EntryRef } from "./metrics/domain.ts";
 import type { PublishInput } from "./publish.ts";
 
 type Call = { method: string; url: URL; auth: string | null; form: Record<string, unknown> | null };
@@ -140,4 +142,36 @@ test("meta test: lists the Pages and Instagram accounts of the token and checks 
     "instagram target 999: NOT among the Instagram accounts of this token",
   ]);
   assert.equal(g.calls[1].url.searchParams.get("fields"), "id,name,instagram_business_account{id,username}");
+});
+
+const published = (id: string, campaignId: string, externalId: string | null): EntryRef => ({ id, campaignId, channel: "instagram", externalId, externalUrl: null });
+/** One metric of IG Media Insights as the Graph API answers it. */
+const insight = (media: string, name: string, value: number) => ({ name, period: "lifetime", values: [{ value }], title: name, description: "", id: `${media}/insights/${name}/lifetime` });
+
+test("instagram metrics: the insights of each published post with the one token, whichever campaign it is in", async () => {
+  const g = fakeGraph((key) => {
+    if (key === "GET /17932174733377207/insights") return { data: [insight("17932174733377207", "views", 4000), insight("17932174733377207", "reach", 2500), insight("17932174733377207", "likes", 310), insight("17932174733377207", "comments", 12), insight("17932174733377207", "shares", 40), insight("17932174733377207", "saved", 25)] };
+    // a metric may come as total_value alone, and one in development may be missing
+    if (key === "GET /17932174733377208/insights") return { data: [{ name: "reach", period: "lifetime", total_value: { value: 70 }, id: "17932174733377208/insights/reach/lifetime" }, insight("17932174733377208", "likes", 2)] };
+    if (key === "GET /17932174733377209/insights") return json({ error: { message: "Unsupported get request. Object with ID '17932174733377209' does not exist", type: "GraphMethodException", code: 100, error_subcode: 33 } }, 400);
+    throw new Error(`unexpected ${key}`);
+  });
+  const source = instagramMetrics(() => ({ token: "TOKEN", version: "v27.0", fetchImpl: g.fetchImpl }));
+  assert.deepEqual([source.id, source.channels, source.measures], ["instagram", ["instagram"], ["exposures", "reach", "reactions", "comments", "shares", "saves"]]);
+
+  const failed = await source.pull!([published("e1", "c1", "17932174733377207"), published("e2", "c2", "17932174733377208"), published("deleted", "c1", "17932174733377209"), published("by-hand", "c1", null)], new Date()).then(() => null, (err) => err);
+  assert.ok(failed instanceof PartialPullError);
+  assert.deepEqual(failed.snapshots, [
+    { entryId: "e1", values: { exposures: 4000, reach: 2500, reactions: 310, comments: 12, shares: 40, saves: 25 } },
+    { entryId: "e2", values: { reach: 70, reactions: 2 } },
+  ]);
+  assert.deepEqual(failed.errors, ["Meta GET /17932174733377209/insights: Unsupported get request. Object with ID '17932174733377209' does not exist (code 100/33) (1 entry not read)"]);
+  assert.deepEqual([g.calls[0].url.pathname, g.calls[0].url.searchParams.get("metric"), g.calls[0].auth], ["/v27.0/17932174733377207/insights", "views,reach,likes,comments,shares,saved", "Bearer TOKEN"]);
+});
+
+test("instagram metrics: a token without the insights permission says which one is missing; no token, no numbers", async () => {
+  const g = fakeGraph(() => json({ error: { message: "(#10) Application does not have permission for this action", type: "OAuthException", code: 10 } }, 403));
+  const failed = await instagramMetrics(() => ({ token: "TOKEN", fetchImpl: g.fetchImpl })).pull!([published("e1", "c1", "17932174733377207")], new Date()).then(() => null, (err) => err);
+  assert.deepEqual(failed.errors, ["Meta GET /17932174733377207/insights: (#10) Application does not have permission for this action (code 10): the token may lack instagram_manage_insights (docs/channels.md) (1 entry not read)"]);
+  assert.deepEqual(await instagramMetrics(() => null).pull!([published("e1", "c1", "17932174733377207")], new Date()), []);
 });

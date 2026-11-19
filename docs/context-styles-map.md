@@ -169,13 +169,18 @@ Done when: a pack is installed with one command, is off, is switched on by a per
 
 ## Step 7: organic post numbers
 
-Step 6 of `analytics.md`. One `MetricsSource` with `pull` per platform (`packages/core/src/metrics/domain.ts`), keyed by the
-`external_id` the connector stored when it published. It reports what the platform exposes of `exposures`, `reach`, `reactions`,
-`comments`, `shares`, `saves`, `video_views`; a number the platform does not give stays unknown, never zero. The hourly pull already
-stores each answer as a point in `entry_metric`, so history builds up.
+Step 6 of `analytics.md`, as built. One `MetricsSource` with `pull` per platform, beside its connector, keyed by the `external_id`
+the connector stored when it published: YouTube (views, likes, comments), TikTok (views, likes, comments, shares), Threads (views,
+likes, replies, reposts and quotes) and Instagram (views, reach, likes, comments, shares, saves). A number the platform does not
+give stays unknown, never zero. The hourly pull stores each answer as a point in `entry_metric`, so history builds up and step 8
+reads views at 1 h, 24 h and 7 d.
 
-One pull request per platform, in the order the channels go live. Reading numbers usually needs one more permission than posting, so
-each platform's connect step is extended; check the platform's current API before building.
+Reading numbers needs one more permission than posting on TikTok (`video.list`), Threads (`threads_manage_insights`) and Instagram
+(`instagram_manage_insights`); the connect steps ask for them and `docs/channels.md` says so. Facebook Page posts and LinkedIn
+are not read (`analytics.md` says why).
+
+Each source is written from the platform's current documentation and tested on recorded answers. Not run against a live account:
+that comes with the first account a person connects.
 
 Done when: a post published through the calendar shows views, reactions and shares in `metrics campaign` the next hour.
 
@@ -248,5 +253,4 @@ the context it was written from, without opening another page.
 
 - Which channels go live first: it sets the order of step 7 and which baseline exists first.
 - Whether a claim found on the company's own site counts as confirmed, or always needs the person.
-- Each platform's permissions and limits for reading post numbers.
 - Whether the graph library builds inside a plugin page (the trial in step 9).

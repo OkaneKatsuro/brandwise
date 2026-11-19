@@ -9,6 +9,7 @@
 import type { Connector, ScopedTokens } from "./publish.ts";
 import { campaignSlug, tagText, withUtm } from "./email/domain/render.ts";
 import { replaceUrls } from "./links/domain.ts";
+import { counts, FETCH_TIMEOUT_MS, pullByCampaign, type EntryRef, type MetricsSource, type Snapshot } from "./metrics/domain.ts";
 
 const AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN = "https://oauth2.googleapis.com/token";
@@ -111,6 +112,41 @@ export function youtube(opts: YouTubeOptions): Connector {
       const json = (await up.json().catch(() => ({}))) as { id?: string } & GoogleError;
       if (!up.ok || !json.id) throw errorOf("upload", up.status, json);
       return { externalId: json.id, url: `https://www.youtube.com/watch?v=${json.id}` };
+    },
+  };
+}
+
+/** videos.list takes this many ids a request. */
+const STATISTICS_CHUNK = 50;
+const VIDEO_ID = /^[A-Za-z0-9_-]{6,20}$/;
+
+/**
+ * What YouTube counts for the videos this connector uploaded (videos.list, part=statistics:
+ * https://developers.google.com/youtube/v3/docs/videos/list), with the readonly scope every connection already has. A view is
+ * both the exposure and the video view of a video. Shares and saves are in the YouTube Analytics API only and stay unknown, and
+ * so does a like count the channel hides. A video that was deleted is not in the answer and gets no numbers. `app` is the Google
+ * client as set at the moment of a pull; without one nothing is measured.
+ */
+export function youtubeMetrics(app: () => YouTubeOptions | null): MetricsSource {
+  /** One videos.list for videos of one channel. */
+  const read = (opts: YouTubeOptions) => async (accessToken: string, videos: EntryRef[]): Promise<Snapshot[]> => {
+    const res = await (opts.fetchImpl ?? fetch)(`${API}/videos?part=statistics&maxResults=${STATISTICS_CHUNK}&id=${videos.map((v) => v.externalId).join(",")}`, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    const json = (await res.json().catch(() => ({}))) as { items?: { id: string; statistics?: { viewCount?: string; likeCount?: string; commentCount?: string } }[] } & GoogleError;
+    if (!res.ok) throw errorOf("videos.list", res.status, json);
+    const counted = new Map((json.items ?? []).map((v) => [v.id, v.statistics ?? {}]));
+    return videos.flatMap((v) => {
+      const s = counted.get(v.externalId!);
+      return s ? [{ entryId: v.id, values: counts({ exposures: s.viewCount, video_views: s.viewCount, reactions: s.likeCount, comments: s.commentCount }) }] : [];
+    });
+  };
+  return {
+    id: "youtube",
+    channels: ["youtube"],
+    measures: ["exposures", "video_views", "reactions", "comments"],
+    async pull(entries) {
+      const opts = app();
+      if (opts === null) return [];
+      return pullByCampaign(entries.filter((e) => VIDEO_ID.test(e.externalId ?? "")), { size: STATISTICS_CHUNK, account: (campaignId) => youtubeAccessToken(opts, campaignId), read: read(opts) });
     },
   };
 }

@@ -37,7 +37,7 @@ Not planned: LLM or token cost accounting (subscriptions make it meaningless).
 - One number per metric per entry: the first source that reports it wins, sources are never added up. An entry's start is what the source says, or its publish time from the review history (step 1) when the source cannot tell.
 - The regulator reads only from here. An experiment may run on any channel where a source measures exposures and clicks, with both arms on the same channel; the rails are unchanged (`docs/editor.md`).
 - E-mail is the first source (`email/metrics-source.ts`). A number its providers cannot emit is missing: Resend reports unsubscribes as contact events, so the unsubscribe guard no longer reads a fake 0 there (D1).
-- CLI: `bb brandwise metrics sources | entry <id> | campaign [--campaign <c>] [--as-of <ISO>]`, `metrics pull [--source <id>] [--days 30]`. No pull source exists yet; the automation that pulls comes with the first one (step 3).
+- CLI: `bb brandwise metrics sources | entry <id> | campaign [--campaign <c>] [--as-of <ISO>]`, `metrics pull [--source <id>] [--days 30]`. The hourly automation "BrandWise metrics" runs the pull.
 - Not changed: `write_variant` tasks still create e-mail entries; arms on other channels are proposed with entries made by hand or by an author.
 
 ## Step 3: own short links
@@ -50,7 +50,7 @@ Not planned: LLM or token cost accounting (subscriptions make it meaningless).
 - E-mail keeps its links: the provider counts its clicks, and redirects through an unknown domain hurt delivery.
 - Needed before it works: a public address that reaches the route (a tunnel or proxy), set as Settings > Short links (`LINKS_BASE_URL` for provisioning). Without it, links are tagged but not shortened. Replacing the plugin's encryption key breaks issued links.
 - CLI: `bb brandwise metrics links <entry>` lists each link with clicks, unique visitors and bot requests.
-- Telegram still reports no views through the Bot API, so a Telegram post has clicks but no exposures, and an A/B test there cannot conclude yet. That needs an exposure source (step 6).
+- Telegram still reports no views through the Bot API, so a Telegram post has clicks but no exposures, and an A/B test there cannot conclude yet. Step 6 does not change that: the Bot API gives no views of a post.
 
 ## Step 4: the client's site (GA4)
 
@@ -73,6 +73,24 @@ Not planned: LLM or token cost accounting (subscriptions make it meaningless).
 - Ads have exposures and clicks, so the rails can judge an A/B test between two ads: both on `meta_ads`, in two child campaigns. Site visits and leads of an ad come from GA4 by the same `utm_content`. Meta's own conversion counts are not used.
 - Settings > Ads: Meta access token (a system-user token with `ads_read`) and the Graph API version (default `v23.0`, which Meta retires after about two years).
 - `metrics campaign`'s funnel adds reach and spend.
+
+## Step 6: organic post numbers
+
+- One pull source per platform, beside its connector: `youtubeMetrics` (`connector-youtube.ts`), `tiktokMetrics`, `threadsMetrics`, `instagramMetrics` (`connector-meta.ts`). Each asks for the posts its connector published, by the id the connector stored, with the account the campaign connected; the hourly pull stores every answer, so history builds up.
+- What each reports, the rest stays unknown:
+
+| Platform | Request | Reported | Permission |
+|---|---|---|---|
+| YouTube | `videos.list?part=statistics`, 50 videos a request | `exposures` and `video_views` (views), `reactions` (likes; unknown when the channel hides them), `comments` | `youtube.readonly`, already part of every connection |
+| TikTok | `POST /v2/video/query/`, 20 videos a request | `exposures` and `video_views` (views), `reactions`, `comments`, `shares` | `video.list` |
+| Threads | `GET /{media}/insights`, one post a request | `exposures` (views), `reactions` (likes), `comments` (replies), `shares` (reposts, quotes and shares together) | `threads_manage_insights` |
+| Instagram | `GET /{media}/insights` on the Graph API, one post a request | `exposures` (views), `reach`, `reactions` (likes), `comments`, `shares`, `saves` | `instagram_manage_insights` on the Meta publish token |
+
+- Threads and Instagram mark `views` as in development and Instagram marks `reach` as estimated: a count a platform leaves out is unknown, never 0. A post it no longer knows (deleted) gets no numbers.
+- One campaign's expired connection, a missing permission or a refused post is reported with how many entries it left unread, and the numbers of the rest are stored. The message says which permission to add and that the account is connected again.
+- TikTok and Threads ask for the new permission when an account connects, so an account connected before this step is connected again once. A TikTok post still recorded by its publish id (TikTok was processing it) has no video id to ask about and stays without numbers.
+- Not read: Facebook Page posts (Meta is retiring Page post metrics, `post_impressions*` among them, and names no single replacement), LinkedIn (member post statistics need the permission `r_member_postAnalytics` and one request per metric), Telegram (no views in the Bot API). YouTube's shares and saves are in the YouTube Analytics API, which is not read, so a YouTube video can be judged `above` but never `viral` (virality needs a share rate).
+- Written from each platform's documentation and tested on recorded answers; none has been run against a live account yet.
 
 ## Virality by rule
 

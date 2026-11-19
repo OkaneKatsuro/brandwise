@@ -1,6 +1,7 @@
 // Publishing: connectors and the run that hands due calendar entries to them (`bb brandwise calendar run-due`, fired every
 // minute by a bb automation). A connector is the only code that talks to a platform; to add a network, add a connector to
-// `connectorsFrom`. Later capabilities (metrics, comments) become optional methods on the same type.
+// `connectorsFrom`. The counts of what a connector published are read by the metrics source in the same file (`youtubeMetrics`,
+// `tiktokMetrics`, `threadsMetrics`, `instagramMetrics`: docs/analytics.md).
 import type { CalendarEntry, Core } from "./index.ts";
 import { mock } from "./connector-mock.ts";
 import { telegram } from "./connector-telegram.ts";
