@@ -95,8 +95,6 @@ apply() {
    # the mode is a user choice in Settings: profile.env only seeds it, unless BW_MODE_ENFORCE=1
    if [ "$first_install" = 1 ] || [ "${BW_MODE_ENFORCE:-0}" = 1 ]; then cfg mode "${BW_MODE:-full}"; fi)
   bb plugin reload brandwise >/dev/null
-  # the campaign badge under thread titles is a row-metadata item; bb draws it only with this experiment on (and Organize > Rows > Metadata)
-  bb settings experiment threadRowMetadata true >/dev/null
   if [ "$(bb brandwise campaign list --json | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')" = 0 ]; then
     bb brandwise campaign add "$BW_DEFAULT_CAMPAIGN" --kind always_on
   fi

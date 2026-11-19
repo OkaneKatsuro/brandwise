@@ -46,7 +46,7 @@ bb's thread list cannot be extended (its Organize menu is a fixed list owned by 
 
 - A thread is linked to a campaign through this plugin's metadata namespace on the thread (`campaignId`). Write it with the thread menu action **Campaign** or `bb brandwise campaign assign|unassign <thread-id> [<campaign>]`.
 - The **Campaigns** page has a sidebar that replaces the thread list while it is open and shows threads grouped by campaign; the page itself lists campaigns with thread, calendar and creative counts and creates new ones.
-- The campaign chip under a thread title is a row-metadata item: provisioning turns on the `threadRowMetadata` experiment, and each user turns on Organize > Rows > Metadata.
+- The campaign chip under a thread title is a row-metadata item: each user turns on Organize > Rows > Metadata. (Older bb versions needed the experiment `threadRowMetadata` for it; bb 0.50 no longer has that experiment.)
 
 ## Display modes (Full / Minimal)
 
